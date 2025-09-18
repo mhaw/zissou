@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "cloud-run": {
+      "command": "",
+      "args": [
+        "npx",
+        "-y,@google-cloud/cloud-run-mcp"
+      ],
+      "env": {
+        "GOOGLE_CLOUD_PROJECT": "zissou-471603",
+        "GOOGLE_CLOUD_REGION": "us-central1"
+      }
+    }
+  }
+}

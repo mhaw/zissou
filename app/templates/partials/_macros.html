@@ -1,0 +1,12 @@
+{% macro sortable_header(sort_key, current_sort, display_name, params) %}
+    {% set sort_dir = 'asc' if current_sort == sort_key else 'desc' %}
+    {% set new_sort = '-' + sort_key if sort_dir == 'desc' else sort_key %}
+    <a href="{{ url_for('admin.index', sort=new_sort, q=params.q, bucket=params.bucket, tag=params.tag, duration=params.duration, status=params.status) }}">
+        {{ display_name }}
+        {% if current_sort == sort_key %}
+            <span class="ml-1">▲</span>
+        {% elif current_sort == '-' + sort_key %}
+            <span class="ml-1">▼</span>
+        {% endif %}
+    </a>
+{% endmacro %}

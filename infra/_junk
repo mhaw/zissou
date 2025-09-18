@@ -1,0 +1,145 @@
+
+You are a senior product+frontend engineer working on the project “Zissou”.
+Focus area: the **Browse Items** experience (listing pages like `/items` and `/buckets/<slug>/items`).
+
+## Goal
+1) **Propose** improvements first (no code yet): UX, information hierarchy, filters/sorting/search, pagination, status badges, quick actions, accessibility, and performance. Provide concrete wireframe-level descriptions and example UI text.
+2) After I approve a subset, **implement** them safely (non-destructive commits) with concise diffs and a validation checklist.
+
+## Ask-First (keep to ≤6 targeted questions; skip if obvious from repo)
+- Confirm template paths for listing pages (e.g., `app/templates/items/list.html`, `app/templates/buckets/items.html`).
+- Confirm data fields available on an item (title, source_url, author, createdAt, duration, bucket(s), tags, audio_url, byte_size, transcript?).
+- Confirm preferred default sort (newest first?) and page size (e.g., 25).
+- Should search query target title + source host + tags?
+- OK to add URL params like `?q=`, `?sort=`, `?tag=`, `?after=` for pagination?
+- Any brand constraints (colors/tones) beyond Tailwind defaults?
+
+## Phase 1 — Propose (no code yet)
+Produce **3 design directions**, each with:
+- **Name & Intent** (e.g., “Fast Filter Grid”, “Reading Queue”, “Compact Audit”)
+- **When it’s best** (user goals / constraints)
+- **Wireframe description** (bulleted DOM layout; what appears above the fold)
+- **Controls & Interactions**
+  - Search (debounced), sort (date/duration/title), tag filter (multi-select), bucket filter (single/multi), date range picker (optional), duration chips (e.g., `<5m`, `5–15m`, `>15m`)
+  - Pagination (cursor or numbered) + page size select
+  - Quick actions: play inline, copy item link, copy enclosure URL, add/remove bucket, edit tags
+- **Status/Badges** (e.g., “Queued”, “Processing”, “Ready”, “Error”)
+- **Empty & Error States** (with CTAs)
+- **A11y** (focus order, ARIA for controls/player, keyboard shortcuts: `/` focus search, `j/k` navigate, `Enter` open)
+- **Performance** (server-side pagination, lightweight cards, lazy-load images/art, prefetch hover, avoid N+1)
+- **Pros/Cons**
+- **Risk/Effort/Impact** (S/M/L and Low/Med/High)
+
+Then output a **Comparative Summary** and a **Recommended Plan** (mix-and-match allowed).
+Stop and wait for my selection/edits before coding.
+
+## Phase 2 — Implement (only after approval)
+Implement the chosen subset. Keep changes **idempotent and minimal**.
+
+### Targets (typical file touch points, adjust to repo)
+- Templates: `app/templates/items/*.html`, `app/templates/buckets/*.html`, `app/templates/partials/*.html`
+- Routes: `app/routes/items.py`, `app/routes/buckets.py`
+- Services: `app/services/models.py` or Firestore adapter for list queries (filters/sort/pagination)
+- Assets: Tailwind classes in `app/static/css/styles.css` (or the Tailwind pipeline)
+- Tests: `tests/test_items_views.py`
+
+### Features to prefer (unless I say otherwise)
+- Search across `title`, `source host`, `tags`
+- Sort by `-createdAt` (default), `title`, `duration`
+- Filters: `bucket`, `tag`, `duration (chips)`, `date range`
+- Pagination: cursor-based (`after`, `limit`)
+- Inline player in each card (small minimal controls)
+- Quick actions:
+  - “Copy item link”
+  - “Copy RSS enclosure”
+  - “Add/Remove bucket” (modal or inline multiselect)
+- Badges: “Ready”, “Processing”, “Error”
+- Skeleton loaders for perceived speed
+- Empty state with “Add URL” CTA
+
+### Coding Guidelines
+- Server-side filtering/sorting/pagination (avoid loading all items).
+- Use URL params; preserve them in pagination links.
+- Escape/sanitize all user-facing fields.
+- Keep templates readable: extract partials (e.g., `_item_card.html`, `_filters.html`, `_pagination.html`).
+- Add small helper functions for param parsing and Firestore queries.
+- Don’t break existing routes or API.
+
+### Output Format (when implementing)
+1) **Summary** — What changed and why (1–2 paragraphs)
+2) **Diffs** — Minimal unified diffs for each file (only relevant hunks)
+3) **Validation Checklist** — Concrete steps to verify locally
+4) **Follow-ups** — Next 3–5 improvements to consider
+
+### Sample Snippets (use/adapt as needed)
+
+**Route param parsing**
+```python
+# app/routes/items.py
+from flask import request
+
+def _parse_list_params():
+    q = request.args.get("q","").strip()
+    sort = request.args.get("sort","-createdAt")
+    tag = request.args.get("tag")  # single for simplicity; allow multi later
+    bucket = request.args.get("bucket")
+    after = request.args.get("after")
+    limit = int(request.args.get("limit", 25))
+    return {"q": q, "sort": sort, "tag": tag, "bucket": bucket, "after": after, "limit": limit}
+
+Duration chips (template fragment)
+
+<div class="flex gap-2 items-center">
+  <a href="{{ url_for(request.endpoint, **request.view_args, **request.args.to_dict(flat=True) | {'dur':'short'}) }}" class="chip">≤5m</a>
+  <a href="{{ url_for(request.endpoint, **request.view_args, **request.args.to_dict(flat=True) | {'dur':'med'}) }}" class="chip">5–15m</a>
+  <a href="{{ url_for(request.endpoint, **request.view_args, **request.args.to_dict(flat=True) | {'dur':'long'}) }}" class="chip">≥15m</a>
+</div>
+
+Item card (compact)
+
+<article class="rounded-2xl border p-4 hover:shadow transition">
+  <header class="flex items-center justify-between">
+    <h3 class="text-lg font-semibold line-clamp-2">
+      <a href="{{ url_for('items.detail', item_id=item.id) }}" class="hover:underline">{{ item.title }}</a>
+    </h3>
+    {% if item.status %}<span class="badge">{{ item.status }}</span>{% endif %}
+  </header>
+  <p class="text-sm text-gray-600">
+    {{ item.source_host }} • {{ item.duration_human }} • {{ item.createdAt|datetime }}
+  </p>
+  <audio class="w-full mt-2" src="{{ item.audio_url }}" preload="none" controls></audio>
+  <footer class="mt-3 flex gap-3 text-sm">
+    <button data-copy="{{ item.permalink }}" class="link">Copy link</button>
+    <button data-copy="{{ item.enclosure_url }}" class="link">Copy enclosure</button>
+    <a href="{{ url_for('buckets.manage', item_id=item.id) }}" class="link">Buckets</a>
+  </footer>
+</article>
+
+Pagination block
+
+<nav class="flex items-center justify-between mt-6">
+  {% if prev_cursor %}<a href="{{ prev_url }}" class="btn">← Newer</a>{% else %}<span></span>{% endif %}
+  {% if next_cursor %}<a href="{{ next_url }}" class="btn">Older →</a>{% endif %}
+</nav>
+
+Skeleton loader
+
+<div class="animate-pulse grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+  {% for _ in range(6) %}
+  <div class="h-40 rounded-2xl bg-gray-200"></div>
+  {% endfor %}
+</div>
+
+Tests (outline)
+	•	test_items_list_default_sort(): newest first
+	•	test_items_search_title() / test_items_filter_tag()
+	•	test_items_pagination_cursor()
+	•	Simple HTML presence checks for controls
+
+Deliverables
+	•	Phase 1: Three design directions + recommended plan (stop for approval).
+	•	Phase 2 (after approval): Diffs, validation checklist, and follow-ups.
+
+Proceed with Phase 1 now. If any Ask-First items remain unclear after scanning the repo, ask the 3–6 questions above, then continue.
+PROMPT
+)”

@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+
+{% block title %}Manage Buckets{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md">
+    <h1 class="text-2xl font-bold mb-6">Buckets</h1>
+    
+    <!-- List existing buckets -->
+    <div class="mb-8 space-y-4">
+        {% for bucket in buckets %}
+        <div class="border p-4 rounded-lg shadow-sm bg-gray-50">
+            <h3 class="font-bold text-lg mb-1">{{ bucket.name }}</h3>
+            <p class="text-sm text-gray-700 mb-2">{{ bucket.description }}</p>
+            <div class="text-xs font-mono mt-1 mb-2">
+                <a href="{{ url_for('feeds.bucket_feed', bucket_slug=bucket.slug) }}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">
+                    RSS Feed: /feeds/{{ bucket.slug }}.xml
+                </a>
+            </div>
+            <div class="mt-2">
+                <a href="{{ url_for('main.bucket_items', bucket_id=bucket.id) }}" class="text-sm text-purple-600 hover:underline">
+                    View Items in this Bucket &rarr;
+                </a>
+            </div>
+        </div>
+        {% else %}
+        <p>No buckets created yet.</p>
+        {% endfor %}
+    </div>
+
+    <!-- Form to create a new bucket -->
+    <h2 class="text-xl font-bold mb-4 border-t pt-6">Create New Bucket</h2>
+    <form method="post" action="{{ url_for('main.list_buckets') }}">
+        <div class="mb-4">
+            <label for="name" class="block text-sm font-bold">Name</label>
+            <input type="text" name="name" id="name" required class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" placeholder="My Favorite Tech Articles">
+        </div>
+        <div class="mb-4">
+            <label for="slug" class="block text-sm font-bold">Slug</label>
+            <input type="text" name="slug" id="slug" required class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" pattern="[a-z0-9-]+" placeholder="my-favorite-tech">
+            <p class="text-xs text-gray-600">Use lowercase letters, numbers, and hyphens only. (e.g., `long-reads`, `tech-news-2025`)</p>
+        </div>
+        <div class="mb-4">
+            <label for="description" class="block text-sm font-bold">Description</label>
+            <textarea name="description" id="description" rows="3" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" placeholder="A collection of interesting articles about technology and software development."></textarea>
+        </div>
+
+        <h3 class="text-lg font-bold mb-4 border-t pt-6">RSS Feed Details (Optional)</h3>
+        <p class="text-xs text-gray-600 mb-4">These values will be used to customize the generated RSS feed. If left blank, the application defaults will be used.</p>
+
+        <div class="mb-4">
+            <label for="rss_author_name" class="block text-sm font-bold">Author Name</label>
+            <input type="text" name="rss_author_name" id="rss_author_name" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" placeholder="The Zissou Crew">
+        </div>
+        <div class="mb-4">
+            <label for="rss_owner_email" class="block text-sm font-bold">Owner Email</label>
+            <input type="email" name="rss_owner_email" id="rss_owner_email" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" placeholder="podmaster@example.com">
+        </div>
+        <div class="mb-4">
+            <label for="rss_cover_image_url" class="block text-sm font-bold">Cover Image URL</label>
+            <input type="url" name="rss_cover_image_url" id="rss_cover_image_url" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" placeholder="https://example.com/cover-art.png">
+        </div>
+
+        <div class="mb-4">
+            <label for="itunes_categories" class="block text-sm font-bold">iTunes Categories (comma-separated)</label>
+            <textarea name="itunes_categories" id="itunes_categories" rows="2" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline" placeholder="Technology, News, Education"></textarea>
+            <p class="text-xs text-gray-600">Choose from the official Apple Podcast categories for best results.</p>
+
+        <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+            Create Bucket
+        </button>
+    </form>
+</div>
+{% endblock %}

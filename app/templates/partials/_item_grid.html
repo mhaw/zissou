@@ -1,0 +1,36 @@
+{% macro render_item_grid(items, bucket_lookup, next_url, empty_message=None, empty_cta_url=None, empty_cta_label=None) -%}
+    {% set empty_message = empty_message or 'No items found.' %}
+    {% set empty_cta_url = empty_cta_url or url_for('main.new_item') %}
+    {% set empty_cta_label = empty_cta_label or 'Add New Item' %}
+    <div id="item-list-container" data-load-more-container>
+        {% if items %}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="item-grid" data-load-more-grid>
+            {% include 'partials/_item_cards.html' %}
+        </div>
+        {% else %}
+        <div class="bg-white p-6 rounded-lg shadow-md text-center" data-empty-state>
+            <p class="text-gray-600 text-lg mb-4">{{ empty_message }}</p>
+            {% if empty_cta_url %}
+            <a href="{{ empty_cta_url }}" class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                {{ empty_cta_label }}
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="flex justify-center mt-8" id="load-more-wrapper" data-load-more-wrapper>
+            {% if next_url %}
+            <button type="button" class="px-6 py-3 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-75" data-load-more-button data-next-url="{{ next_url }}">
+                Load More
+            </button>
+            <span class="ml-4 hidden items-center text-blue-600" data-load-more-spinner>
+                <svg class="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </span>
+            {% endif %}
+            <p class="ml-4 text-sm text-rose-600 hidden" data-load-more-error role="status"></p>
+        </div>
+    </div>
+{%- endmacro %}

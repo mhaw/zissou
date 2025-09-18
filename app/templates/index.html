@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% from 'partials/_item_grid.html' import render_item_grid %}
+
+{% block title %}All Items{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 md:pb-48 lg:pb-56">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">All Items</h1>
+
+    {% include 'partials/_search_filter_bar.html' %}
+
+    {% if recent_buckets %}
+    <section class="hidden md:block md:fixed md:bottom-6 md:left-1/2 md:z-30 md:w-full md:max-w-4xl md:-translate-x-1/2 md:px-4 pointer-events-none" data-dnd-dock>
+        <div class="rounded-3xl border border-dashed border-slate-300 bg-slate-50/90 p-6 shadow-xl ring-1 ring-black/5 backdrop-blur-sm pointer-events-auto" data-dnd-panel data-dnd-lab aria-label="Bucket drag-and-drop assignment">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <h2 class="text-lg font-semibold text-slate-800">Quick bucket drop</h2>
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center gap-2 rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3" />
+                        </svg>
+                        Quick Assign
+                    </span>
+                    <button type="button" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-200" data-dnd-toggle aria-expanded="true">
+                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        <span class="text-xs font-semibold">Hide</span>
+                    </button>
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-slate-600">Drag any article card into a bucket to assign it instantly. Updates are applied as soon as you drop.</p>
+            <p class="mt-1 text-xs text-slate-500">Showing the four most recently updated buckets.</p>
+            <div class="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                {% for bucket in recent_buckets %}
+                <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition data-[state=active]:border-blue-400 data-[state=active]:shadow-lg data-[state=pending]:border-blue-400 data-[state=pending]:shadow-lg data-[state=success]:border-emerald-400 data-[state=success]:shadow-lg data-[state=error]:border-rose-400 data-[state=duplicate]:border-amber-300" data-drop-target data-bucket-id="{{ bucket.id }}" data-bucket-name="{{ bucket.name }}">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-sm font-semibold text-slate-800">{{ bucket.name }}</h3>
+                        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Drop here</span>
+                    </div>
+                    <p class="mt-2 text-xs text-slate-500 leading-relaxed">Articles dropped here will be staged for <strong>{{ bucket.name }}</strong>.</p>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="mt-4 hidden text-sm font-medium text-slate-500" data-dnd-status role="status"></p>
+        </div>
+        <div class="pointer-events-auto mt-3 flex justify-center">
+            <button type="button" class="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-200" data-dnd-restore aria-expanded="false">
+                <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Show bucket drop
+            </button>
+        </div>
+    </section>
+    {% endif %}
+
+    {{ render_item_grid(items, bucket_lookup, next_url, 'No items found matching your criteria.', url_for('main.new_item'), 'Add New Item') }}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='js/bucket-dnd-prototype.js') }}"></script>
+{% endblock %}

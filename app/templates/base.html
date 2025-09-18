@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Zissou{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='img/zissou_favicon.png') }}">
+    {% block meta %}
+    <meta name="description" content="Zissou: Convert articles to audio and generate RSS feeds.">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Zissou">
+    <meta property="og:title" content="Zissou">
+    <meta property="og:description" content="Convert articles to audio and generate RSS feeds.">
+    <meta property="og:image" content="{{ url_for('static', filename='img/zissou_logo.png') }}">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Zissou">
+    <meta name="twitter:description" content="Convert articles to audio and generate RSS feeds.">
+    <meta name="twitter:image" content="{{ url_for('static', filename='img/zissou_logo.png') }}">
+    {% endblock %}
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div class="container mx-auto p-4">
+        {% include 'partials/_header.html' %}
+        <main class="mt-8">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="mb-4">
+                    {% for category, message in messages %}
+                        <div class="p-4 rounded {{ 'bg-red-200 text-red-800' if category == 'error' else 'bg-blue-200 text-blue-800' }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+        {% include 'partials/_footer.html' %}
+    </div>
+    <script src="{{ url_for('static', filename='js/bucket-assignment.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tag-components.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/load-more.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

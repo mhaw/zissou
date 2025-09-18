@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}Submit a new Article{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white p-8 rounded-lg shadow-md">
+    <h1 class="text-2xl font-bold mb-6 text-center">Add an Article to the Boombox</h1>
+    <form method="post">
+        <div class="mb-4">
+            <label for="url" class="block text-gray-700 text-sm font-bold mb-2">Article URL:</label>
+            <input type="url" name="url" id="url" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="https://www.example.com/article" value="{{ prefill_url }}">
+        </div>
+        <div class="mb-6">
+            <label for="voice" class="block text-gray-700 text-sm font-bold mb-2">Voice:</label>
+            <select name="voice" id="voice" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                {% for key, profile in voice_profiles.items() %}
+                    <option value="{{ key }}">{{ profile.description }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-6">
+            <label for="bucket_id" class="block text-gray-700 text-sm font-bold mb-2">Bucket:</label>
+            <select name="bucket_id" id="bucket_id" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                <option value="">No Bucket (Default)</option>
+                {% for bucket in buckets %}
+                    <option value="{{ bucket.id }}">{{ bucket.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="flex items-center justify-center">
+            <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                Analyze Article
+            </button>
+        </div>
+    </form>
+
+    <section class="mt-8 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5" aria-label="Bookmarklet">
+        <h2 class="text-lg font-semibold text-slate-800">Save the Bookmarklet</h2>
+        <p class="mt-2 text-sm text-slate-600">
+            Drag the button below to your bookmarks bar. When you are reading an article, click it to open Zissou with the URL pre-filled.
+        </p>
+        <div class="mt-4 flex flex-wrap items-center gap-3">
+            <a href="{{ bookmarklet_js|safe }}" class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
+                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+                Save to Zissou
+            </a>
+            <button type="button" class="text-xs font-medium text-slate-500 underline" data-copy-bookmarklet data-snippet="{{ bookmarklet_js }}">
+                Copy bookmarklet code
+            </button>
+        </div>
+        <p class="mt-3 text-xs text-slate-500" data-bookmarklet-feedback role="status" aria-live="polite"></p>
+        <details class="mt-4 text-xs text-slate-500">
+            <summary class="cursor-pointer font-semibold text-slate-600">Manual install instructions</summary>
+            <p class="mt-2">Create a new bookmark and paste the following code as the URL:</p>
+            <pre class="mt-2 overflow-x-auto rounded bg-slate-900 p-3 text-[11px] text-slate-100">{{ bookmarklet_js }}</pre>
+        </details>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const copyButton = document.querySelector('[data-copy-bookmarklet]');
+        const feedback = document.querySelector('[data-bookmarklet-feedback]');
+        if (!copyButton || !navigator.clipboard) {
+            return;
+        }
+        copyButton.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(copyButton.dataset.snippet || '');
+                if (feedback) {
+                    feedback.textContent = 'Bookmarklet copied to clipboard.';
+                    feedback.classList.remove('text-rose-500');
+                    feedback.classList.add('text-emerald-600');
+                    window.setTimeout(() => {
+                        feedback.textContent = '';
+                    }, 4000);
+                }
+            } catch (error) {
+                console.error('Failed to copy bookmarklet', error);
+                if (feedback) {
+                    feedback.textContent = 'Unable to copy bookmarklet automatically.';
+                    feedback.classList.remove('text-emerald-600');
+                    feedback.classList.add('text-rose-500');
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

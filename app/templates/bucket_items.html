@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% from 'partials/_item_grid.html' import render_item_grid %}
+
+{% block title %}{{ bucket.name }} Items{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-gray-900 mb-2">Bucket: {{ bucket.name }}</h1>
+    <p class="text-gray-600 mb-6">{{ bucket.description }}</p>
+
+    {% include 'partials/_search_filter_bar.html' %}
+
+    {{ render_item_grid(items, bucket_lookup, next_url, 'No items found in this bucket matching your criteria.', url_for('main.new_item'), 'Add New Item') }}
+</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% set lookup = bucket_lookup if bucket_lookup is defined and bucket_lookup is not none else {} %}
+{% set bucket_ids = (bucket_ids or []) %}
+{% if bucket_ids %}
+    {% for identifier in bucket_ids %}
+        {% set bucket = lookup.get(identifier) if lookup else None %}
+        <span class="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800" data-item-bucket-chip data-bucket-id="{{ identifier }}">
+            <svg class="h-3.5 w-3.5 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 2a1 1 0 01.894.553l1.382 2.764 3.05.443a1 1 0 01.554 1.706l-2.207 2.152.521 3.04a1 1 0 01-1.451 1.054L10 12.347l-2.743 1.44a1 1 0 01-1.451-1.054l.521-3.04L4.12 7.466a1 1 0 01.554-1.706l3.05-.443L9.106 2.553A1 1 0 0110 2z" />
+            </svg>
+            {{ bucket.name if bucket else identifier }}
+        </span>
+    {% endfor %}
+{% else %}
+    <span class="inline-flex items-center gap-2 rounded-full border border-dashed border-slate-300 px-3 py-1 text-xs text-slate-500" data-item-bucket-empty>No buckets assigned yet</span>
+{% endif %}

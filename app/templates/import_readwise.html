@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+
+{% block title %}Import from Readwise{% endblock %}
+
+{% block content %}
+<div class="mx-auto flex max-w-4xl flex-col gap-8">
+    <section class="rounded-3xl bg-white p-6 shadow">
+        <h1 class="text-2xl font-semibold text-slate-900">Import from Readwise Reeder</h1>
+        <p class="mt-2 text-sm text-slate-600">Paste a public Readwise Reeder shared view to preview its articles and queue them for narration.</p>
+        <form method="get" class="mt-4 flex flex-col gap-3 md:flex-row md:items-end">
+            <div class="flex-1">
+                <label for="shared_url" class="block text-sm font-semibold text-slate-700">Shared link</label>
+                <input type="url" id="shared_url" name="shared_url" placeholder="https://share.readwise.io/..." value="{{ shared_url }}" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+            </div>
+            <button type="submit" class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300">Load articles</button>
+        </form>
+    </section>
+
+    {% if readwise_articles %}
+    <form method="post" class="rounded-3xl bg-white p-6 shadow" data-readwise-import>
+        <input type="hidden" name="shared_url" value="{{ shared_url }}">
+        <div class="flex flex-col gap-4 md:flex-row md:items-end">
+            <div class="flex-1">
+                <label class="block text-sm font-semibold text-slate-700" for="voice">Voice</label>
+                <select id="voice" name="voice" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <option value="">Use default</option>
+                    {% for key, profile in voice_profiles.items() %}
+                        <option value="{{ key }}" {% if selected_voice == key %}selected{% endif %}>{{ profile.description }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex-1">
+                <label class="block text-sm font-semibold text-slate-700" for="bucket_id">Bucket</label>
+                <select id="bucket_id" name="bucket_id" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <option value="">No bucket</option>
+                    {% for bucket in buckets %}
+                        <option value="{{ bucket.id }}" {% if selected_bucket == bucket.id %}selected{% endif %}>{{ bucket.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300">
+                Queue Selected Articles
+            </button>
+        </div>
+
+        <div class="mt-6 flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-slate-800">{{ share_title or 'Shared articles' }}</h2>
+            <div class="flex items-center gap-3 text-sm">
+                <label class="inline-flex items-center gap-2 text-slate-600">
+                    <input type="checkbox" data-toggle-all class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked>
+                    Select all
+                </label>
+            </div>
+        </div>
+
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+            {% for article in readwise_articles %}
+            <label class="flex cursor-pointer flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm transition data-[checked=true]:border-blue-500 data-[checked=true]:shadow-lg" data-article-card>
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" name="article_urls" value="{{ article.url }}" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" checked data-article-checkbox>
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-slate-900">{{ article.title }}</p>
+                        {% if article.source %}
+                        <p class="text-xs uppercase tracking-wide text-slate-500">{{ article.source }}</p>
+                        {% endif %}
+                        {% if article.author %}
+                        <p class="text-xs text-slate-500">{{ article.author }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 text-xs font-medium text-blue-600 hover:text-blue-700">
+                    View original
+                    <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                </a>
+            </label>
+            {% endfor %}
+        </div>
+    </form>
+    {% elif shared_url %}
+    <section class="rounded-3xl border border-dashed border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
+        No articles were detected in this shared view. Make sure the link is public and try again.
+    </section>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const form = document.querySelector('[data-readwise-import]');
+        if (!form) {
+            return;
+        }
+        const toggleAll = form.querySelector('[data-toggle-all]');
+        const checkboxes = Array.from(form.querySelectorAll('[data-article-checkbox]'));
+        const cards = Array.from(form.querySelectorAll('[data-article-card]'));
+
+        function syncCardState() {
+            cards.forEach((card) => {
+                const checkbox = card.querySelector('[data-article-checkbox]');
+                if (!checkbox) {
+                    return;
+                }
+                card.dataset.checked = checkbox.checked ? 'true' : 'false';
+            });
+        }
+
+        checkboxes.forEach((checkbox) => {
+            checkbox.addEventListener('change', syncCardState);
+        });
+
+        if (toggleAll) {
+            toggleAll.addEventListener('change', () => {
+                const checked = toggleAll.checked;
+                checkboxes.forEach((checkbox) => {
+                    checkbox.checked = checked;
+                });
+                syncCardState();
+            });
+        }
+
+        syncCardState();
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% set endpoint = request.endpoint or '' %}
+{% set browse_active = endpoint in ['main.index', 'main.item_detail'] %}
+{% set buckets_active = endpoint in ['main.list_buckets', 'main.bucket_items'] %}
+{% set admin_active = endpoint.startswith('admin.') %}
+{% set import_active = endpoint == 'main.import_readwise' %}
+<header class="bg-white shadow-md rounded-lg p-4 mb-6">
+    <nav class="flex flex-wrap items-center justify-between gap-4">
+        <a href="{{ url_for('main.index') }}" class="flex items-center space-x-3">
+            <img src="{{ url_for('static', filename='img/zissou_logo.png') }}" alt="Zissou Logo" class="h-8 w-8">
+            <span class="text-2xl font-bold text-blue-600">Zissou Boombox</span>
+        </a>
+        <button type="button"
+                id="primary-nav-toggle"
+                class="md:hidden inline-flex items-center justify-center rounded-md border border-gray-300 p-2 text-gray-600 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-expanded="false"
+                aria-controls="primary-nav">
+            <span class="sr-only">Toggle navigation</span>
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+        </button>
+        <div id="primary-nav" class="hidden w-full flex flex-col gap-2 md:flex md:w-auto md:flex-row md:items-center md:gap-2">
+            <a href="{{ url_for('main.new_item') }}"
+               class="px-4 py-2 rounded-md transition-colors duration-150 {{ 'bg-blue-500 text-white shadow-sm' if endpoint == 'main.new_item' else 'bg-blue-600 text-white hover:bg-blue-700' }}">
+                Submit URL
+            </a>
+            <a href="{{ url_for('main.import_readwise') }}"
+               class="px-4 py-2 rounded-md transition-colors duration-150 {{ 'bg-blue-50 text-blue-700 font-semibold' if import_active else 'text-gray-600 hover:text-blue-600' }}">
+                Import Readwise
+            </a>
+            <a href="{{ url_for('main.index') }}"
+               class="px-4 py-2 rounded-md transition-colors duration-150 {{ 'bg-blue-50 text-blue-700 font-semibold' if browse_active else 'text-gray-600 hover:text-blue-600' }}">
+                Browse Items
+            </a>
+            <a href="{{ url_for('main.list_buckets') }}"
+               class="px-4 py-2 rounded-md transition-colors duration-150 {{ 'bg-blue-50 text-blue-700 font-semibold' if buckets_active else 'text-gray-600 hover:text-blue-600' }}">
+                Buckets
+            </a>
+            <a href="{{ url_for('admin.index') }}"
+               class="px-4 py-2 rounded-md transition-colors duration-150 {{ 'bg-blue-50 text-blue-700 font-semibold' if admin_active else 'text-gray-600 hover:text-blue-600' }}">
+                Admin
+            </a>
+        </div>
+    </nav>
+</header>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const navToggle = document.getElementById('primary-nav-toggle');
+        const navMenu = document.getElementById('primary-nav');
+
+        if (!navToggle || !navMenu) {
+            return;
+        }
+
+        navToggle.addEventListener('click', function() {
+            const isHidden = navMenu.classList.toggle('hidden');
+            navToggle.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
+        });
+    });
+</script>

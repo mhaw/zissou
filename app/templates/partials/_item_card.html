@@ -1,0 +1,131 @@
+<article class="group relative flex h-full flex-col rounded-3xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow duration-200 hover:shadow-2xl" draggable="true" data-drag-item data-item-id="{{ item.id }}" data-item-title="{{ item.title }}" data-item-buckets='{{ (item.buckets or []) | tojson }}' data-bucket-endpoint="{{ url_for('main.update_item_buckets_api', item_id=item.id) }}" aria-grabbed="false">
+    <header class="mb-4 space-y-3">
+        <div class="flex items-start justify-between gap-3">
+            <h3 class="text-xl font-semibold leading-snug text-gray-900">
+                <a href="{{ url_for('main.item_detail', item_id=item.id) }}" class="hover:underline">
+                    {{ item.title }}
+                </a>
+            </h3>
+            {% if item.status %}
+            <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold tracking-wide
+                {% if item.status == 'READY' %}bg-emerald-100 text-emerald-800
+                {% elif item.status == 'PROCESSING' %}bg-amber-100 text-amber-800
+                {% elif item.status == 'FAILED' %}bg-rose-100 text-rose-800
+                {% else %}bg-slate-100 text-slate-800{% endif %}">
+                {{ item.status.replace('_', ' ').title() }}
+            </span>
+            {% endif %}
+        </div>
+        <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500" aria-hidden="true">
+            <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h.01M13.5 6h.01M10.5 12h.01M13.5 12h.01M10.5 18h.01M13.5 18h.01" />
+            </svg>
+            Drag to bucket
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <span class="font-medium text-slate-700">{{ item.author or 'Unknown Author' }}</span>
+            <span aria-hidden="true">•</span>
+            <span>{{ url_host(item.source_url) }}</span>
+        </div>
+    </header>
+
+    <dl class="grid grid-cols-1 gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+        <div class="rounded-2xl bg-slate-50 p-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Duration</dt>
+            <dd class="mt-1 font-medium text-slate-900">{{ item.durationSeconds | format_duration }}</dd>
+        </div>
+        <div class="rounded-2xl bg-slate-50 p-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Added</dt>
+            <dd class="mt-1 font-medium text-slate-900">{{ item.createdAt | format_datetime }}</dd>
+        </div>
+        <div class="rounded-2xl bg-slate-50 p-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Published</dt>
+            <dd class="mt-1 font-medium text-slate-900">
+                {% if item.publishedAt %}
+                    {{ item.publishedAt | format_datetime }}
+                {% else %}
+                    Not set
+                {% endif %}
+            </dd>
+        </div>
+        {% if item.voiceSetting %}
+        <div class="rounded-2xl bg-slate-50 p-3">
+            <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Voice</dt>
+            <dd class="mt-1 font-medium text-slate-900 truncate">{{ item.voiceSetting }}</dd>
+        </div>
+        {% endif %}
+    </dl>
+
+    {% if item.audio_url %}
+    <div class="mt-4 rounded-2xl bg-slate-900/5 p-3">
+        <audio controls preload="none" class="w-full">
+            <source src="{{ item.audio_url }}" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
+    </div>
+    {% endif %}
+
+    <div class="mt-4" data-item-buckets-section>
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Buckets</span>
+        <div class="mt-2 flex flex-wrap gap-2" data-item-bucket-list>
+            {% if item.buckets %}
+                {% for bucket_id in item.buckets %}
+                    {% set bucket = bucket_lookup.get(bucket_id) if bucket_lookup is defined else None %}
+                    <span class="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800" data-item-bucket-chip data-bucket-id="{{ bucket_id }}">
+                        <svg class="h-3.5 w-3.5 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                            <path d="M10 2a1 1 0 01.894.553l1.382 2.764 3.05.443a1 1 0 01.554 1.706l-2.207 2.152.521 3.04a1 1 0 01-1.451 1.054L10 12.347l-2.743 1.44a1 1 0 01-1.451-1.054l.521-3.04L4.12 7.466a1 1 0 01.554-1.706l3.05-.443L9.106 2.553A1 1 0 0110 2z" />
+                        </svg>
+                        {{ bucket.name if bucket else ('Bucket ' ~ loop.index) }}
+                    </span>
+                {% endfor %}
+            {% else %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-dashed border-slate-300 px-3 py-1 text-xs text-slate-500" data-item-bucket-empty>Drop into a bucket to assign</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if item.tags %}
+    <div class="mt-4">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</span>
+        <div class="mt-2 flex flex-wrap gap-2">
+            {% for tag in item.tags %}
+            <span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold {{ tag | tag_color_class }}">
+                <svg class="h-3.5 w-3.5 opacity-60" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M5 3h6l7 7-7 7-6-6V3z" />
+                </svg>
+                {{ tag }}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <footer class="mt-6 flex flex-wrap items-center gap-3 text-sm font-medium text-blue-600">
+        <button type="button" class="inline-flex items-center gap-1 hover:underline" onclick="navigator.clipboard.writeText('{{ url_for('main.item_detail', item_id=item.id, _external=True) }}')">
+            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 17h8a2 2 0 002-2V7m-6 4l4-4m0 0l-4-4m4 4H8a2 2 0 00-2 2v6m6 0l-4 4m0 0l4 4m-4-4h8" />
+            </svg>
+            Copy link
+        </button>
+        {% if item.enclosure_url %}
+        <button type="button" class="inline-flex items-center gap-1 hover:underline" onclick="navigator.clipboard.writeText('{{ item.enclosure_url }}')">
+            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m-7-7h14" />
+            </svg>
+            Copy enclosure
+        </button>
+        {% endif %}
+        <a href="{{ url_for('main.item_detail', item_id=item.id) }}#buckets" class="inline-flex items-center gap-1 hover:underline">
+            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
+            Buckets
+        </a>
+        <a href="{{ url_for('main.item_detail', item_id=item.id) }}#tags" class="inline-flex items-center gap-1 hover:underline">
+            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 8l4 4-4 4M13 16h6" />
+            </svg>
+            Edit Tags
+        </a>
+    </footer>
+</article>

@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+
+{% block title %}Processing Article{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md text-center">
+    <h1 class="text-3xl font-bold mb-4">Processing Your Article...</h1>
+    <p class="text-gray-600 mb-6">This may take a moment. Please do not close this page.</p>
+
+    <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mx-auto mb-6"></div>
+
+    <p id="status-message" class="text-lg font-semibold text-blue-700">Starting...</p>
+    <p id="error-message" class="text-red-500 mt-4"></p>
+
+    <script>
+        const taskId = "{{ task_id }}";
+        const statusMessage = document.getElementById('status-message');
+        const errorMessage = document.getElementById('error-message');
+        let intervalId;
+
+        const fetchStatus = async () => {
+            try {
+                const response = await fetch(`/status/${taskId}`);
+                const data = await response.json();
+
+                const formattedStatus = data.status.replace(/_/g, ' ').toLowerCase();
+                statusMessage.textContent = `Status: ${formattedStatus.charAt(0).toUpperCase() + formattedStatus.slice(1)}`;
+
+
+                if (data.status === 'COMPLETED') {
+                    clearInterval(intervalId);
+                    statusMessage.textContent = 'Processing complete! Redirecting...';
+                    window.location.href = `/items/${data.item_id}`;
+                } else if (data.status === 'FAILED') {
+                    clearInterval(intervalId);
+                    statusMessage.textContent = 'Processing failed.';
+                    errorMessage.textContent = `Error: ${data.error || 'An unknown error occurred.'}`;
+                }
+            } catch (error) {
+                clearInterval(intervalId);
+                statusMessage.textContent = 'Failed to fetch status.';
+                errorMessage.textContent = `Network error: ${error.message}`;
+                console.error('Error fetching status:', error);
+            }
+        };
+
+        // Fetch status immediately and then every 5 seconds
+        fetchStatus();
+        intervalId = setInterval(fetchStatus, 5000);
+    </script>
+</div>
+{% endblock %}
