@@ -3,3 +3,25 @@ body {
     /* Example: Add a subtle background pattern */
     /* background-image: url('/static/images/bg-pattern.png'); */
 }
+
+[data-audio-player] button {
+    transition: transform 0.1s ease-in-out, background-color 0.1s ease-in-out;
+}
+
+[data-audio-player] button:active {
+    transform: scale(0.95);
+}
+
+[data-audio-play-pause]:active {
+    transform: scale(0.9);
+}
+
+[data-audio-skip]:active,
+[data-mute-toggle]:active {
+    background-color: #e2e8f0; /* slate-200 */
+}
+
+[data-playback-rate-selector] > button:active {
+    transform: scale(0.95);
+    color: #1e293b; /* slate-800 */
+}

@@ -1,8 +1,11 @@
-from flask import Flask
-from dotenv import load_dotenv
 import os
-from app.utils.logging_config import setup_logging
+
+import firebase_admin  # type: ignore[import-untyped]
+from dotenv import load_dotenv
+from flask import Flask, g
+
 from app.extensions import cache
+from app.utils.logging_config import setup_logging
 
 # OpenTelemetry Imports for Tracing
 # from opentelemetry import trace
@@ -48,10 +51,33 @@ def create_app():
     if redis_url:
         cache_defaults["CACHE_REDIS_URL"] = redis_url
 
+    secret_key = os.getenv("FLASK_SECRET_KEY") or os.getenv("SECRET_KEY") or "dev"
+    session_cookie_name = os.getenv("SESSION_COOKIE_NAME", "__zissou_session")
+    auth_enabled = os.getenv("AUTH_ENABLED", "false").lower() == "true"
+    session_cookie_secure = os.getenv("SESSION_COOKIE_SECURE", "true").lower() == "true"
+    firebase_project_id = os.getenv("FIREBASE_PROJECT_ID")
+    admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
+    admin_emails = [
+        email.strip().lower() for email in admin_emails_raw.split(",") if email.strip()
+    ]
+
     app.config.from_mapping(
-        SECRET_KEY=os.getenv("SECRET_KEY"),
+        SECRET_KEY=secret_key,
+        SESSION_COOKIE_NAME=session_cookie_name,
+        SESSION_COOKIE_SECURE=session_cookie_secure,
+        AUTH_ENABLED=auth_enabled,
+        FIREBASE_PROJECT_ID=firebase_project_id,
+        FIREBASE_WEB_API_KEY=os.getenv("FIREBASE_WEB_API_KEY"),
+        FIREBASE_AUTH_DOMAIN=os.getenv("FIREBASE_AUTH_DOMAIN"),
+        ADMIN_EMAILS=admin_emails,
         **cache_defaults,
     )
+
+    if auth_enabled and not firebase_project_id:
+        raise RuntimeError("FIREBASE_PROJECT_ID must be set when AUTH_ENABLED is true")
+
+    if firebase_project_id and not firebase_admin._apps:
+        firebase_admin.initialize_app()
 
     cache.init_app(app)
 
@@ -62,11 +88,22 @@ def create_app():
         pass
 
     # Register Blueprints
-    from .routes import main, feeds, admin
+    from .routes import admin, auth, feeds, main
 
     app.register_blueprint(main.bp)
     app.register_blueprint(feeds.bp)
     app.register_blueprint(admin.bp)
+    app.register_blueprint(auth.bp)
+
+    if auth_enabled:
+        from app.auth import ensure_user
+
+        @app.before_request
+        def attach_authenticated_user() -> None:
+            if not app.config.get("AUTH_ENABLED", False):
+                g.user = None
+                return
+            ensure_user()
 
     # Conditionally register the task handler blueprint
     # This is to avoid running the task handler in a local dev environment

@@ -11,6 +11,11 @@ from urllib.parse import quote
 
 import requests
 
+try:
+    from playwright.sync_api import sync_playwright, PlaywrightContextManager
+except ModuleNotFoundError:
+    sync_playwright: Optional[Callable[[], PlaywrightContextManager]] = None
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = os.getenv(
@@ -201,6 +206,23 @@ def fetch_with_resilience(
             "response_headers": dict(response.headers),
             "request_headers": headers,
         }
+
+
+def fetch_with_playwright(url: str, timeout: Optional[float] = None) -> dict:
+    if sync_playwright is None:
+        return {"error": "Playwright not installed"}
+
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+            page = browser.new_page(user_agent=USER_AGENT)
+            page.goto(url, timeout=int((timeout or REQUEST_TIMEOUT_SECONDS) * 1000))
+            html = page.content()
+            final_url = page.url
+            browser.close()
+            return {"html": html, "final_url": final_url}
+        except Exception as exc:
+            return {"error": f"Playwright failed to fetch URL: {exc}"}
 
 
 class ArchiveRateLimiter:

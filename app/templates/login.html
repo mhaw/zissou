@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Sign in</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
+      .container { max-width: 420px; margin: 0 auto; text-align: center; }
+      button { padding: 0.75rem 1.25rem; font-size: 1rem; border-radius: 6px; border: none; background: #1a73e8; color: #fff; cursor: pointer; }
+      button:disabled { background: #9bbcff; cursor: not-allowed; }
+      .error { color: #c62828; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Sign in with Google</h1>
+      <p>We use Google to keep your Zissou account secure.</p>
+      <div style="margin: 1rem 0;">
+        <input type="checkbox" id="rememberMe" name="rememberMe" checked>
+        <label for="rememberMe">Remember me</label>
+      </div>
+      <button id="googleSignIn" type="button">Continue with Google</button>
+      <p id="error" class="error" role="alert" hidden></p>
+    </div>
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+      import { getAuth, GoogleAuthProvider, signInWithPopup, getIdToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+      const firebaseConfig = {{ firebase_config | tojson }};
+      const nextPath = {{ next_path | tojson }};
+
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      auth.useDeviceLanguage();
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+
+      const errorEl = document.getElementById("error");
+      const toggleError = (message) => {
+        if (!message) {
+          errorEl.hidden = true;
+          return;
+        }
+        errorEl.hidden = false;
+        errorEl.textContent = message;
+      };
+
+      document.getElementById("googleSignIn").addEventListener("click", async () => {
+        toggleError("");
+        const button = document.getElementById("googleSignIn");
+        button.disabled = true;
+
+        try {
+          const result = await signInWithPopup(auth, provider);
+          const idToken = await getIdToken(result.user, true);
+          const rememberMe = document.getElementById('rememberMe').checked;
+          const response = await fetch("/auth/sessionLogin", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken, rememberMe })
+          });
+
+          if (!response.ok) {
+            throw new Error("Server rejected login request");
+          }
+
+          const destination = nextPath || "/";
+          window.location.assign(destination);
+        } catch (error) {
+          console.error("Firebase sign-in failed", error);
+          toggleError("We couldn't sign you in. Please try again.");
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

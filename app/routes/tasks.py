@@ -13,16 +13,18 @@ from datetime import datetime
 
 from dateutil import parser as date_parser
 from flask import Blueprint, jsonify, g, request
-from pydub import AudioSegment
+from pydub import AudioSegment  # type: ignore[import-untyped]
 
 from app.models.item import Item
 from app.services import buckets as buckets_service
 from app.services import (
     items as items_service,
+    buckets as buckets_service,
     parser,
     storage,
     tts,
     tasks as tasks_service,
+    smart_buckets as smart_buckets_service,
 )
 from app.services.items import FirestoreError
 from app.services.storage import StorageError
@@ -276,8 +278,9 @@ def process_task_handler():
         if task:
             voice = voice or task.voice
             bucket_id = bucket_id or task.bucket_id
+            user_id = user_id or task.userId # Use task.userId if not in payload
 
-        process_article_task(task_id, url, voice, bucket_id)
+        process_article_task(task_id, url, voice, bucket_id, user_id)
 
         return jsonify({"status": "ok"}), 200
 
@@ -292,7 +295,7 @@ def process_task_handler():
         )
 
 
-def process_article_task(task_id, url, voice=None, bucket_id=None):
+def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None):
     """The background task for processing an article."""
     logger.info("Task %s: Starting processing for URL: %s", task_id, url)
     start_time = datetime.utcnow()
@@ -341,7 +344,7 @@ def process_article_task(task_id, url, voice=None, bucket_id=None):
             )
 
         raw_text_content = parsed_data["text"] or ""
-        text_content = raw_text_content.replace("\r\n", "\n").replace("\r", "\n")
+        text_content = raw_text_content.replace("\\r\\n", "\\n").replace("\\r", "\\n")
         parser_name = parsed_data.get("parser", "unknown")
 
         published_at = None
@@ -475,7 +478,17 @@ def process_article_task(task_id, url, voice=None, bucket_id=None):
         )
         if bucket_id:
             new_item.buckets.append(bucket_id)
-        item_id = items_service.create_item(new_item)
+        item_id = items_service.create_item(new_item, user_id)
+
+        # Apply smart buckets
+        smart_buckets = smart_buckets_service.list_smart_buckets()
+        for smart_bucket in smart_buckets:
+            if smart_buckets_service.evaluate_item(new_item, smart_bucket.rules):
+                if smart_bucket.id not in new_item.buckets:
+                    new_item.buckets.append(smart_bucket.id)
+        
+        if new_item.buckets:
+            items_service.update_item_buckets(item_id, new_item.buckets)
 
         tasks_service.update_task(task_id, status="COMPLETED", item_id=item_id)
         logger.info("Task %s: Completed successfully. Item ID: %s", task_id, item_id)

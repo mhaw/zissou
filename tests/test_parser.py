@@ -213,4 +213,3 @@ def test_extract_with_trafilatura_handles_new_metadata_signature(monkeypatch):
     assert result["author"] == "Author"
     assert result["image_url"] == "https://example.com/cover.jpg"
     assert captured["default_url"] == "http://example.com/article"
-

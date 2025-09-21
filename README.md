@@ -135,6 +135,21 @@ After the first deployment, you must add the service's URL to your `.env` file. 
 
 ## Configuration
 
+### Authentication
+
+Role-based access is controlled via the `ADMIN_EMAILS` environment variable. To grant admin privileges to specific users, set this variable to a comma-separated list of their email addresses in your `.env` file.
+
+```
+ADMIN_EMAILS=user1@example.com,user2@example.com
+```
+
+If `ADMIN_EMAILS` is not set, the application will grant admin rights to the first user who signs in. This is convenient for initial setup but should be configured for production environments.
+
+Session duration can be configured with the following variables:
+
+- `SESSION_COOKIE_LIFETIME_DAYS`: The default session lifetime in days (default: `5`).
+- `SESSION_COOKIE_LIFETIME_REMEMBER_ME_DAYS`: The session lifetime in days when "Remember Me" is checked (default: `30`).
+
 ### How to Configure Voices
 
 You can set the default TTS voice in your `.env` file using the `TTS_VOICE` variable. The following creative profiles are available:
@@ -203,7 +218,8 @@ The main item listing page (`/`) and bucket-specific item pages (`/buckets/<slug
     -   **Inline Audio Player**: Play audio directly from the listing.
     -   **Status Badges**: Clear visual indicators for item processing status (Ready, Processing, Failed).
     -   **Quick Actions**: Easily copy item links, copy RSS enclosure URLs, or jump to bucket and tag management.
-    -   **Metadata At-a-Glance**: Card badges surface duration, publish date, assigned buckets, and color-coded tags for quick scanning.
+    - **Metadata At-a-Glance**: Card badges surface duration, publish date, assigned buckets, and color-coded tags for quick scanning.
+    - **Archive**: Archive articles to hide them from the main list without deleting them.
 -   **Drag Prototype**: Try the drag-to-bucket prototype above the grid to see how quick categorisation might work (UI only for now).
 
 All filtering, sorting, and pagination are handled server-side to ensure performance and scalability.

@@ -436,6 +436,12 @@
         return `${Math.floor(rounded / 60)}:${String(seconds).padStart(2, '0')}`;
     }
 
+    function triggerHapticFeedback() {
+        if (navigator.vibrate) {
+            navigator.vibrate(50);
+        }
+    }
+
     function initMediaSession(audio, host) {
         if (!('mediaSession' in navigator)) {
             return;
@@ -546,6 +552,14 @@
         const durationLabel = host.querySelector('[data-audio-duration]');
         const progressTrack = host.querySelector('[data-audio-progress-track]');
         const progressBar = host.querySelector('[data-audio-progress-bar]');
+        const playPauseBtn = host.querySelector('[data-audio-play-pause]');
+        const playIcon = host.querySelector('[data-play-icon]');
+        const pauseIcon = host.querySelector('[data-pause-icon]');
+        const skipButtons = host.querySelectorAll('[data-audio-skip]');
+        const playbackRateSelector = host.querySelector('[data-playback-rate-selector]');
+        const volumeControl = host.querySelector('[data-volume-control]');
+        const muteToggle = host.querySelector('[data-mute-toggle]');
+        const volumeSlider = host.querySelector('[data-volume-slider]');
 
         const initialDuration = parseFloat(host.dataset.duration);
         if (Number.isFinite(initialDuration) && durationLabel) {
@@ -572,11 +586,86 @@
             }
         };
 
+        const togglePlay = () => {
+            triggerHapticFeedback();
+            if (audio.paused) {
+                audio.play();
+            } else {
+                audio.pause();
+            }
+        };
+
+        const updatePlayPauseIcon = () => {
+            if (!playIcon || !pauseIcon) return;
+            if (audio.paused) {
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+            } else {
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            }
+        };
+
+        playPauseBtn.addEventListener('click', togglePlay);
+        audio.addEventListener('play', updatePlayPauseIcon);
+        audio.addEventListener('pause', updatePlayPauseIcon);
+
+        skipButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                triggerHapticFeedback();
+                const skipTime = parseFloat(button.dataset.audioSkip);
+                audio.currentTime = Math.max(0, audio.currentTime + skipTime);
+            });
+        });
+
+        if (playbackRateSelector) {
+            const rateButton = playbackRateSelector.querySelector('button');
+            const rateOptions = playbackRateSelector.querySelector('div');
+            rateButton.addEventListener('click', () => {
+                rateOptions.classList.toggle('hidden');
+            });
+            rateOptions.addEventListener('click', (e) => {
+                if (e.target.dataset.rate) {
+                    const rate = parseFloat(e.target.dataset.rate);
+                    audio.playbackRate = rate;
+                    rateButton.textContent = `${rate}x`;
+                    rateOptions.classList.add('hidden');
+                }
+            });
+        }
+
+        if (volumeControl) {
+            muteToggle.addEventListener('click', () => {
+                triggerHapticFeedback();
+                audio.muted = !audio.muted;
+            });
+
+            volumeSlider.addEventListener('input', (e) => {
+                audio.volume = parseFloat(e.target.value);
+            });
+
+            audio.addEventListener('volumechange', () => {
+                volumeSlider.value = audio.volume;
+                // You can also update mute toggle icon here based on volume and muted state
+            });
+        }
+        
+        const storageKey = `audio-progress-${host.dataset.source}`;
+        
         audio.addEventListener('loadedmetadata', () => {
+            const savedTime = localStorage.getItem(storageKey);
+            if (savedTime) {
+                audio.currentTime = parseFloat(savedTime);
+            }
             updateDuration();
             updateProgress();
         });
-        audio.addEventListener('timeupdate', updateProgress);
+        
+        audio.addEventListener('timeupdate', () => {
+            localStorage.setItem(storageKey, audio.currentTime);
+            updateProgress();
+        });
+        
         audio.addEventListener('seeking', updateProgress);
         audio.addEventListener('ratechange', updateProgress);
         audio.addEventListener('ended', () => {
@@ -589,6 +678,7 @@
             if (currentLabel && Number.isFinite(audio.duration)) {
                 currentLabel.textContent = formatClockTime(audio.duration);
             }
+            localStorage.removeItem(storageKey);
         });
 
         initMediaSession(audio, host);

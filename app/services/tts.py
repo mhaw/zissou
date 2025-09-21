@@ -1,13 +1,14 @@
 import io
 import logging
 import os
-import time
+import random
 import re
-from typing import Tuple
+import time
+from typing import List, Optional, Tuple
 
 from google.api_core.exceptions import GoogleAPIError
 from google.cloud import texttospeech
-from pydub import AudioSegment
+from pydub import AudioSegment  # type: ignore[import-untyped]
 from pydub import exceptions as pydub_exceptions
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,76 @@ VOICE_PROFILES = {
         "speaking_rate": 0.99,
         "pitch": 0.0,
     },
+    "story-teller": {
+        "name": "en-US-Studio-Q",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "Story Teller (US Studio, Expressive)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "news-anchor": {
+        "name": "en-US-Neural2-A",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "News Anchor (US English, Authoritative)",
+        "speaking_rate": 0.95,
+        "pitch": -2.0,
+    },
+    "documentary": {
+        "name": "en-GB-Neural2-D",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "Documentary (UK English, Deep)",
+        "speaking_rate": 0.9,
+        "pitch": -3.0,
+    },
+    "field-reporter": {
+        "name": "en-AU-Neural2-B",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "Field Reporter (AU English, Clear)",
+        "speaking_rate": 1.05,
+        "pitch": 0.0,
+    },
+    "news-reader-indian": {
+        "name": "en-IN-Neural2-A",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "News Reader (Indian English, Professional)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "customer-service-indian": {
+        "name": "en-IN-Wavenet-D",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "Customer Service (Indian English, Friendly)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "news-presenter-uk": {
+        "name": "en-GB-News-G",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "News Presenter (UK English, Authoritative)",
+        "speaking_rate": 0.9,
+        "pitch": -1.0,
+    },
+    "news-presenter-us": {
+        "name": "en-US-News-N",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "News Presenter (US English, Energetic)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "sensual-male": {
+        "name": "en-US-Wavenet-J",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "Sensual Male (US English, Soft)",
+        "speaking_rate": 0.9,
+        "pitch": -4.0,
+    },
+    "sensual-female": {
+        "name": "en-US-Wavenet-H",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "Sensual Female (US English, Soft)",
+        "speaking_rate": 0.9,
+        "pitch": -2.0,
+    },
 }
 
 _AUDIO_FORMATS = {
@@ -127,7 +198,7 @@ def _get_tts_client() -> texttospeech.TextToSpeechClient:
 
 
 def text_to_speech(
-    text: str, voice_name: str = "captains-log", use_ssml: bool = False
+    text: str, voice_name: Optional[str] = None, use_ssml: bool = False
 ) -> Tuple[bytes, float, str]:
     """Converts text (or SSML) to speech using Google Text-to-Speech API."""
     if not text:
@@ -151,9 +222,11 @@ def text_to_speech(
 
     client = _get_tts_client()
 
+    if not voice_name:
+        voice_name = random.choice(list(VOICE_PROFILES.keys()))
     voice_profile = VOICE_PROFILES.get(voice_name, VOICE_PROFILES["captains-log"])
     voice_selection_params = texttospeech.VoiceSelectionParams(
-        language_code="-".join(voice_profile["name"].split("-")[:2]),
+        language_code="-".join(str(voice_profile["name"]).split("-")[:2]),
         name=voice_profile["name"],
         ssml_gender=voice_profile["gender"],
     )
@@ -162,7 +235,7 @@ def text_to_speech(
     pitch = voice_profile.get("pitch")
 
     audio_config_kwargs = {
-        "audio_encoding": texttospeech.AudioEncoding[get_audio_encoding_key()],
+        "audio_encoding": getattr(texttospeech.AudioEncoding, get_audio_encoding_key()),
         "speaking_rate": speaking_rate,
     }
     if pitch is not None:
@@ -246,7 +319,7 @@ def text_to_speech(
         logger.error("Unexpected error calculating audio duration: %s", exc)
         duration_seconds = 0.0
 
-    return response.audio_content, duration_seconds, voice_profile["description"]
+    return response.audio_content, duration_seconds, str(voice_profile["description"])
 
 
 class TTSError(Exception):

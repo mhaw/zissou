@@ -24,6 +24,7 @@ help:
 	@echo "  install        - Install dependencies from requirements.txt"
 	@echo "  fmt            - Format code with black and ruff"
 	@echo "  lint           - Lint code with ruff"
+	@echo "  typecheck      - Run type checks with mypy"
 	@echo "  test           - Run tests with pytest"
 	@echo "  dev            - Run Flask development server"
 	@echo "  build          - Build Docker image (tags commit and latest)"
@@ -55,6 +56,9 @@ fmt:
 
 lint:
 	$(VENV_DIR)/bin/ruff .
+
+typecheck:
+	$(VENV_DIR)/bin/mypy app/
 
 test:
 	$(VENV_DIR)/bin/pytest

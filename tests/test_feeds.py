@@ -215,4 +215,3 @@ def test_generate_feed_skips_invalid_episode_image(
     item_image = item_elem.find("itunes:image", namespaces=ns)
     assert item_image is not None
     assert item_image.attrib["href"] == fallback_url
-

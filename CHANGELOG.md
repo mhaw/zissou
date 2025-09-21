@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **User-Specific Voices**: Users can now set a default voice for their articles in their profile.
+- **Smart Buckets**: Create rule-based buckets to automatically categorize articles based on domain, title, or other metadata.
+- **Article Archiving**: Archive articles to hide them from the main list without deleting them.
+- **Improved Error Handling in UI**: The item detail page now displays a user-friendly error message if the article processing has failed.
+
+### Changed
+- **Authentication**: The authentication flow now creates a user profile in Firestore when a new user signs in. The user's default voice is stored in their profile.
+
+
+
 ### Changed
 - **RSS Podcast Feeds**: Expanded RSS/iTunes metadata (author, subtitle, summary, artwork), standardized GUIDs/pubDate/keywords, added per-episode duration/enclosure details, and improved enclosure MIME/length for better podcast client compatibility.
 - **Extractor Resilience**: Added a cascading pipeline that evaluates Trafilatura, Newspaper3k, Readability, and a BeautifulSoup heuristic with per-engine win metrics and hybrid refetches (rotating headers/referrers) to recover truncated articles from defensive sites like NYTimes and The New Yorker.

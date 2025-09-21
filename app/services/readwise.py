@@ -136,7 +136,7 @@ def _extract_from_dom(soup: BeautifulSoup, base_url: str) -> List[ReadwiseArticl
     candidate_links = list(links) + list(soup.find_all("a"))
 
     for link in candidate_links:
-        href = link.get("data-reading-item-url") or link.get("href")
+        href = link.get("data-reading-item-url") or link.get("href")  # type: ignore[attr-defined]
         if not href:
             continue
         absolute = urljoin(base_url, href)

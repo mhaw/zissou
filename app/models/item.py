@@ -4,12 +4,12 @@ from datetime import datetime
 
 @dataclass
 class Item:
-    id: str = None
+    id: str | None = None
     title: str = ""
     sourceUrl: str = ""
     author: str = ""
-    publishedAt: datetime = None  # New field for publication date
-    imageUrl: str = None  # New field for main image URL
+    publishedAt: datetime | None = None  # New field for publication date
+    imageUrl: str | None = None  # New field for main image URL
     text: str = ""
     audioUrl: str = ""
     audioSizeBytes: int = 0
@@ -27,7 +27,12 @@ class Item:
     uploadTimeMs: int = 0
     chunkCount: int = 0
     textLength: int = 0
+    reading_time: int = 0
     tags: list[str] = field(default_factory=list)
+    is_archived: bool = False
+    is_read: bool = False
+    userId: str | None = None
+    is_public: bool = False
 
     @property
     def source_url(self) -> str | None:
@@ -45,3 +50,10 @@ class Item:
     @property
     def image_url(self) -> str | None:
         return getattr(self, "imageUrl", None)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Item":
+        # Filter out unexpected fields to prevent errors
+        item_fields = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        filtered_data = {k: v for k, v in data.items() if k in item_fields}
+        return cls(**filtered_data)

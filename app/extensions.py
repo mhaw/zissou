@@ -6,7 +6,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for offline dev/test
 
     logger = logging.getLogger(__name__)
 
-    class Cache:  # minimal fallback shim
+    class Cache:  # minimal fallback shim  # type: ignore[no-redef]
         def __init__(self):
             logger.warning("Flask-Caching not installed; using no-op cache shim.")
 

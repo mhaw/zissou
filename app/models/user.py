@@ -1,18 +1,17 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime
 
 
 @dataclass
-class Bucket:
+class User:
     id: str | None = None
+    email: str = ""
     name: str = ""
-    slug: str = ""
-    description: str = ""
-    rss_author_name: str | None = ""
-    rss_owner_email: str | None = ""
-    rss_cover_image_url: str | None = ""
-    itunes_categories: list[str] = field(default_factory=list)
+    role: str = "member"
+    default_voice: str | None = None
+    default_bucket_id: str | None = None
+    articles_listened_to: int = 0
+    total_listening_time: int = 0
     createdAt: datetime | None = None
     updatedAt: datetime | None = None

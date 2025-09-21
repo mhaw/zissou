@@ -15,6 +15,8 @@ from app.services.firestore_helpers import (
 # Use the shared client from the items service to ensure single instantiation
 from .items import db, FirestoreError
 
+from typing import Callable, List, Optional
+
 logger = logging.getLogger(__name__)
 
 BUCKETS_COLLECTION = os.getenv("FIRESTORE_COLLECTION_BUCKETS", "buckets")
@@ -123,10 +125,10 @@ def create_bucket(
     name: str,
     slug: str,
     description: str,
-    rss_author_name: str = None,
-    rss_owner_email: str = None,
-    rss_cover_image_url: str = None,
-    itunes_categories: list[str] = None,
+    rss_author_name: Optional[str] = None,
+    rss_owner_email: Optional[str] = None,
+    rss_cover_image_url: Optional[str] = None,
+    itunes_categories: Optional[list[str]] = None,
 ):
     """Creates a new bucket."""
     _require_db()
@@ -151,7 +153,7 @@ def create_bucket(
         }
         bucket_ref.set(payload)
         clear_cached_functions(
-            list_buckets, list_recent_buckets, get_bucket, get_bucket_by_slug
+            (list_buckets, list_recent_buckets, get_bucket, get_bucket_by_slug)
         )
         return bucket_ref.id
     except GoogleCloudError as e:

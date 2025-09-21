@@ -1,4 +1,5 @@
 import logging
+import random
 from urllib.parse import urlencode, urlparse
 from flask import (
     Blueprint,
@@ -10,12 +11,15 @@ from flask import (
     url_for,
     jsonify,
 )
+from app.auth import auth_required
 from app.extensions import cache
 from app.services import (
     items as items_service,
     buckets as buckets_service,
     tasks as tasks_service,
     readwise as readwise_service,
+    users as users_service,
+    smart_buckets as smart_buckets_service,
 )
 
 from app.services.tts import VOICE_PROFILES
@@ -39,6 +43,8 @@ def _parse_list_params():
     duration = request.args.get("duration")
     after = request.args.get("after")
     limit = int(request.args.get("limit", 25))
+    include_archived = request.args.get("include_archived", "false").lower() == "true"
+    include_read = request.args.get("include_read", "false").lower() == "true"
 
     raw_tags = request.args.getlist("tags")
     if not raw_tags:
@@ -78,6 +84,12 @@ def _build_next_url(params: dict, next_cursor: str | None) -> str | None:
             for tag in value or []:
                 if tag:
                     query_items.append(("tags", tag))
+        elif key == "include_archived":
+            if value is True:
+                query_items.append(("include_archived", "true"))
+        elif key == "include_read":
+            if value is True:
+                query_items.append(("include_read", "true"))
         else:
             query_items.append((key, str(value)))
     query_items.append(("after", next_cursor))
@@ -115,17 +127,20 @@ def _request_wants_json() -> bool:
     return wants_json
 
 
-def _load_item_listing(params: dict) -> dict:
+def _load_item_listing(params: dict, archived_status: str = "unarchived") -> dict:
     """Fetches items and associated metadata for browse-style views."""
+    user_id = g.user["uid"] if g.user else None
     selected_tags = tuple(params.get("tags", ()))
     items, next_cursor = items_service.list_items(
-        q=params.get("q"),
-        sort=params.get("sort"),
-        tags=selected_tags,
-        bucket_id=params.get("bucket"),
-        duration=params.get("duration"),
-        after=params.get("after"),
-        limit=params.get("limit"),
+        user_id=user_id,
+        search_query=params.get("q"),
+        sort_by=params.get("sort") or "newest",
+        tags=list(selected_tags),
+        bucket_slug=params.get("bucket"),
+        cursor=params.get("after"),
+        limit=int(params.get("limit") or 25),
+        include_archived=bool(params.get("include_archived")),
+        include_read=bool(params.get("include_read")),
     )
     all_buckets = buckets_service.list_buckets()
     bucket_lookup = {
@@ -221,6 +236,7 @@ def index():
         next_cursor=listing["next_cursor"],
         next_url=listing["next_url"],
         all_tags=listing["all_tags"],
+        include_read=params.get("include_read"),
     )
 
 
@@ -258,7 +274,7 @@ def new_item():
             return redirect(url_for("main.new_item", url=url))
 
         try:
-            task_id = tasks_service.create_task(url, voice=voice, bucket_id=bucket_id)
+            task_id = tasks_service.create_task(url, voice=voice, bucket_id=bucket_id, user=g.user)
             return redirect(url_for("main.progress_page", task_id=task_id))
         except (FirestoreError, ValueError) as e:
             logger.error(f"Failed to create processing task for url {url}: {e}")
@@ -272,12 +288,14 @@ def new_item():
         + "?url='+encodeURIComponent(location.href),'_blank','noopener');})();"
     )
 
+    suggested_voice = random.choice(list(VOICE_PROFILES.keys()))
     return render_template(
         "new_item.html",
         voice_profiles=VOICE_PROFILES,
         buckets=all_buckets,
         prefill_url=prefill_url,
         bookmarklet_js=bookmarklet_js,
+        suggested_voice=suggested_voice,
     )  # Pass buckets to template
 
 
@@ -287,7 +305,7 @@ def import_readwise():
     shared_url = ""
     share_title = None
     articles: list[readwise_service.ReadwiseArticle] = []
-    default_voice = None
+    default_voice = random.choice(list(VOICE_PROFILES.keys()))
     default_bucket = None
 
     if request.method == "POST":
@@ -353,6 +371,7 @@ def import_readwise():
                     article_url,
                     voice=default_voice or None,
                     bucket_id=default_bucket or None,
+                    user=g.user,
                 )
                 queued += 1
             except Exception:  # pragma: no cover - defensive guard
@@ -594,6 +613,8 @@ def item_detail(item_id):
         flash("Item not found.")
         return redirect(url_for("main.index"))
 
+    task = tasks_service.get_task_by_source_url(item.sourceUrl)
+
     if request.method == "POST":
         if "tags" in request.form:
             raw_tags = request.form.getlist("tags")
@@ -637,6 +658,47 @@ def item_detail(item_id):
         bucket_options=bucket_options,
         all_tags=all_tags,
     )
+
+
+@bp.route("/items/<item_id>/read", methods=["POST"])
+def read_item(item_id):
+    """Marks an item as read or unread."""
+    item = items_service.get_item(item_id)
+    if not item:
+        flash("Item not found.", "error")
+        return redirect(url_for("main.index"))
+
+    try:
+        items_service.toggle_read_status(item_id, g.user["uid"])
+        _invalidate_page_cache()
+        flash(f"Item marked as {'read' if item.is_read else 'unread'} successfully.", "info")
+    except FirestoreError as e:
+        logger.error(f"Failed to update read status for item {item_id}: {e}")
+        flash("Error updating item. Please try again later.", "error")
+    except PermissionError:
+        flash("You do not have permission to modify this item.", "error")
+
+    return redirect(request.referrer or url_for("main.index"))
+
+
+@bp.route("/items/<item_id>/archive", methods=["POST"])
+def archive_item(item_id):
+    """Archives or unarchives an item."""
+    item = items_service.get_item(item_id)
+    if not item:
+        flash("Item not found.", "error")
+        return redirect(url_for("main.index"))
+
+    is_archived = not item.is_archived
+    try:
+        items_service.update_item_archived_status(item_id, is_archived)
+        _invalidate_page_cache()
+        flash(f"Item {'archived' if is_archived else 'unarchived'} successfully.", "info")
+    except FirestoreError as e:
+        logger.error(f"Failed to update archived status for item {item_id}: {e}")
+        flash("Error updating item. Please try again later.", "error")
+
+    return redirect(request.referrer or url_for("main.index"))
 
 
 @bp.route("/buckets/<bucket_id>/items")
@@ -724,3 +786,99 @@ def list_buckets():
 @bp.route("/health")
 def health_check():
     return "OK", 200
+
+
+@bp.route("/archived")
+def archived_items():
+    """Lists all archived items."""
+    params = _parse_list_params()
+    listing = _load_item_listing(params, archived_status="archived")
+
+    if _request_wants_json():
+        items_html = render_template(
+            "partials/_item_cards.html",
+            items=listing["items"],
+            bucket_lookup=listing["bucket_lookup"],
+        )
+        return jsonify(
+            {
+                "items_html": items_html,
+                "next_url": listing["next_url"],
+                "items_count": len(listing["items"]),
+            }
+        )
+
+    return render_template(
+        "archived.html",
+        items=listing["items"],
+        buckets=listing["all_buckets"],
+        bucket_lookup=listing["bucket_lookup"],
+        params=params,
+        selected_tags=listing["selected_tags"],
+        next_cursor=listing["next_cursor"],
+        next_url=listing["next_url"],
+        all_tags=listing["all_tags"],
+    )
+
+
+@bp.route("/surprise_me", methods=["GET"])
+@auth_required
+def surprise_me():
+    """Redirects to a random unread item."""
+    user_id = g.user["uid"]
+    item = items_service.get_random_unread_item(user_id)
+    if item:
+        return redirect(url_for("main.item_detail", item_id=item.id))
+    else:
+        flash("No unread items found. Why not add some new articles?", "info")
+        return redirect(url_for("main.index"))
+
+
+@bp.route("/dashboard")
+@auth_required
+def dashboard():
+    user = getattr(g, "user", {})
+    email = user.get("email") or user.get("uid") or "signed-in user"
+    return f"Protected dashboard ready for {email}"
+
+
+@bp.route("/smart-buckets", methods=["GET", "POST"])
+@auth_required
+def smart_buckets():
+    if request.method == "POST":
+        name = request.form.get("name")
+        rules = []
+        rule_index = 0
+        while f"rules[{rule_index}][field]" in request.form:
+            field = request.form.get(f"rules[{rule_index}][field]")
+            operator = request.form.get(f"rules[{rule_index}][operator]")
+            value = request.form.get(f"rules[{rule_index}][value]")
+            rules.append(SmartBucketRule(field=field, operator=operator, value=value))
+            rule_index += 1
+
+        if name and rules:
+            smart_bucket = smart_buckets_service.SmartBucket(name=name, rules=rules)
+            smart_buckets_service.create_smart_bucket(smart_bucket)
+            flash("Smart bucket created successfully.", "success")
+        else:
+            flash("Name and at least one rule are required.", "error")
+
+        return redirect(url_for("main.smart_buckets"))
+
+    smart_buckets = smart_buckets_service.list_smart_buckets()
+    return render_template("smart_buckets.html", smart_buckets=smart_buckets)
+
+
+@bp.route("/profile", methods=["GET", "POST"])
+@auth_required
+def profile():
+    user = users_service.get_user(g.user["uid"])
+    all_buckets = buckets_service.list_buckets()
+    if request.method == "POST":
+        default_voice = request.form.get("default_voice")
+        default_bucket_id = request.form.get("default_bucket_id")
+        users_service.update_user(user.id, {"default_voice": default_voice, "default_bucket_id": default_bucket_id})
+        flash("Your profile has been updated.", "success")
+        return redirect(url_for("main.profile"))
+
+    return render_template("profile.html", user=user, voice_profiles=VOICE_PROFILES, buckets=all_buckets)

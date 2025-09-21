@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+
+{% block title %}Your Profile{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md">
+    <h1 class="text-3xl font-bold mb-2">Your Profile</h1>
+    <p class="text-gray-600 mb-4">Update your settings.</p>
+
+    <form method="post">
+        <div class="mb-4">
+            <label for="default_voice" class="block text-sm font-medium text-gray-700">Default Voice</label>
+            <select id="default_voice" name="default_voice" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                {% for voice_id, voice in voice_profiles.items() %}
+                    <option value="{{ voice_id }}" {% if user.default_voice == voice_id %}selected{% endif %}>{{ voice.description }}</option>
+                {% endfor %}
+            </select>
+            <audio id="voice-preview" controls class="mt-2 w-full hidden">
+                <source src="" type="audio/mpeg">
+                Your browser does not support the audio element.
+            </audio>
+        </div>
+
+        <div class="mb-4">
+            <label for="default_bucket_id" class="block text-sm font-medium text-gray-700">Default Bucket</label>
+            <select id="default_bucket_id" name="default_bucket_id" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                <option value="">No default bucket</option>
+                {% for bucket in buckets %}
+                    <option value="{{ bucket.id }}" {% if user.default_bucket_id == bucket.id %}selected{% endif %}>{{ bucket.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="mt-6">
+            <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                Save Changes
+            </button>
+        </div>
+    </form>
+
+    <div class="mt-8 pt-8 border-t border-gray-200">
+        <h2 class="text-2xl font-bold mb-4">Your Listening Stats</h2>
+        <dl class="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
+            <div class="sm:col-span-1">
+                <dt class="text-sm font-medium text-gray-500">Articles Listened To</dt>
+                <dd class="mt-1 text-lg font-semibold text-gray-900">{{ user.articles_listened_to }}</dd>
+            </div>
+            <div class="sm:col-span-1">
+                <dt class="text-sm font-medium text-gray-500">Total Listening Time</dt>
+                <dd class="mt-1 text-lg font-semibold text-gray-900">{{ user.total_listening_time }} minutes</dd>
+            </div>
+        </dl>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const voiceSelect = document.getElementById('default_voice');
+        const voicePreview = document.getElementById('voice-preview');
+        const voiceSource = voicePreview.querySelector('source');
+
+        function updateVoicePreview() {
+            const selectedVoiceId = voiceSelect.value;
+            if (selectedVoiceId) {
+                // Assuming audio files are named after voice_id and are .mp3
+                // For now, using .txt placeholders as actual audio generation is not possible
+                voiceSource.src = `/static/audio/${selectedVoiceId}.txt`;
+                voicePreview.load();
+                voicePreview.classList.remove('hidden');
+            } else {
+                voiceSource.src = '';
+                voicePreview.classList.add('hidden');
+            }
+        }
+
+        voiceSelect.addEventListener('change', updateVoicePreview);
+
+        // Initialize preview on page load if a voice is already selected
+        updateVoicePreview();
+    });
+</script>
+{% endblock %}

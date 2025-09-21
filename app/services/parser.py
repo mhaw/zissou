@@ -3,7 +3,7 @@ import os
 import re
 import inspect
 from collections import Counter
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Any
 
 import trafilatura
 
@@ -17,22 +17,30 @@ try:
 except (
     ModuleNotFoundError
 ):  # pragma: no cover - optional dependency for offline test runs
-    Article = None  # type: ignore[assignment]
-    Config = None  # type: ignore[assignment]
+    Article: Optional[type] = None  # type: ignore[assignment]
+    Config: Optional[type] = None  # type: ignore[assignment]
 
 try:
     from readability import Document
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     Document = None  # type: ignore[assignment]
 
-from trafilatura.settings import use_config
+from trafilatura.settings import use_config  # type: ignore[import-untyped]
 
 from app.utils.text_cleaner import clean_text
+
+def calculate_reading_time(text: str, words_per_minute: int = 200) -> int:
+    """Calculates the estimated reading time in minutes for a given text."""
+    words = text.split()
+    num_words = len(words)
+    reading_time = num_words / words_per_minute
+    return max(1, int(round(reading_time)))
 
 from app.services.fetch import (
     REQUEST_TIMEOUT_SECONDS,
     USER_AGENT,
     fetch_with_resilience,
+    fetch_with_playwright,
     hybrid_fetch_attempts,
     is_likely_truncated,
     recover_truncated_content,
@@ -40,7 +48,7 @@ from app.services.fetch import (
 
 logger = logging.getLogger(__name__)
 
-ExtractorFn = Callable[[str, str, Optional[str]], dict]
+ExtractorFn = Callable[[str, str, Optional[str]], dict[str, Any]]
 
 ENGINE_SUCCESS_THRESHOLD = int(os.getenv("EXTRACTOR_SUCCESS_THRESHOLD", "500"))
 HEURISTIC_MIN_PARAGRAPH_CHARS = int(os.getenv("HEURISTIC_MIN_PARAGRAPH_CHARS", "40"))
@@ -69,10 +77,21 @@ ENGINE_PIPELINE_ORDER: Tuple[str, ...] = (
 )
 
 
+from dataclasses import dataclass
+
+@dataclass
+class ArticleParseResult:
+    title: str
+    author: str
+    published_at: Optional[str]
+    image_url: Optional[str]
+    text: str
+    reading_time: int = 0
+
 try:
-    _TRAFILATURA_METADATA_SUPPORTS_CONFIG = "config" in inspect.signature(
-        trafilatura.extract_metadata
-    ).parameters
+    _TRAFILATURA_METADATA_SUPPORTS_CONFIG = (
+        "config" in inspect.signature(trafilatura.extract_metadata).parameters
+    )
 except (ValueError, TypeError, AttributeError):
     _TRAFILATURA_METADATA_SUPPORTS_CONFIG = False
 
@@ -116,7 +135,7 @@ def _record_win(engine: str) -> None:
 def _build_metrics_snapshot(
     winner: Optional[str], last_engine: Optional[str] = None
 ) -> dict:
-    snapshot = {}
+    snapshot: dict[str, Any] = {}
     for engine in ENGINE_PIPELINE_ORDER:
         attempts = _ENGINE_ATTEMPTS.get(engine, 0)
         wins = _ENGINE_WINS.get(engine, 0)
@@ -144,7 +163,17 @@ def get_extractor_metrics() -> dict:
 
 def extract_text(url: str) -> dict:
     """Extract the main article content with resilient fetching and recovery."""
-    fetch_result = fetch_with_resilience(url, user_agent=USER_AGENT)
+    use_playwright = os.getenv("ENABLE_PLAYWRIGHT", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+    if use_playwright:
+        fetch_result = fetch_with_playwright(url)
+    else:
+        fetch_result = fetch_with_resilience(url, user_agent=USER_AGENT)
+
     if fetch_result.get("error"):
         return fetch_result
 
@@ -155,7 +184,7 @@ def extract_text(url: str) -> dict:
     if parsed.get("error"):
         return parsed
 
-    parsed.setdefault("fetched_via", "direct")
+    parsed.setdefault("fetched_via", "playwright" if use_playwright else "direct")
 
     if is_likely_truncated(parsed.get("text")):
         baseline_length = len((parsed.get("text") or "").strip())
@@ -257,6 +286,7 @@ def _process_html(
         best_result["extractor_metrics"] = _build_metrics_snapshot(
             metrics_winner, winning_engine
         )
+        best_result["reading_time"] = calculate_reading_time(best_result.get("text", ""))
         return best_result
 
     error_message = errors[0] if errors else "No extractor produced text."
@@ -513,7 +543,7 @@ def _extract_with_plaintext(
 
     text_candidate = ""
     soup = _initialise_soup(html) if BeautifulSoup else None
-    if soup is not None:
+    if soup is not None:  # type: ignore[truthy-function]
         try:
             text_candidate = soup.get_text("\n", strip=True)
         except Exception:  # pragma: no cover - defensive guard
@@ -540,13 +570,13 @@ def _extract_with_plaintext(
                 title = (
                     title_node
                     if isinstance(title_node, str)
-                    else title_node.get_text(strip=True)
+                    else title_node.get_text(strip=True) # type: ignore[attr-defined]
                 ) or "Untitled"
             except Exception:  # pragma: no cover - defensive guard
                 title = "Untitled"
         meta_author = soup.find("meta", attrs={"name": "author"})
-        if meta_author and meta_author.get("content"):
-            author = meta_author.get("content").strip() or "Unknown"
+        if meta_author and meta_author.get("content"): # type: ignore[attr-defined]
+            author = meta_author.get("content").strip() or "Unknown" # type: ignore[attr-defined]
 
     return {
         "title": title,
@@ -638,10 +668,12 @@ def _extract_with_trafilatura(
     config.set("DEFAULT", "URL", url)
     metadata = _extract_trafilatura_metadata(downloaded, url, config)
 
-    metadata_title = metadata.title if metadata and hasattr(metadata, 'title') else None
-    metadata_author = metadata.author if metadata and hasattr(metadata, 'author') else None
-    metadata_date = metadata.date if metadata and hasattr(metadata, 'date') else None
-    metadata_image = metadata.image if metadata and hasattr(metadata, 'image') else None
+    metadata_title = metadata.title if metadata and hasattr(metadata, "title") else None
+    metadata_author = (
+        metadata.author if metadata and hasattr(metadata, "author") else None
+    )
+    metadata_date = metadata.date if metadata and hasattr(metadata, "date") else None
+    metadata_image = metadata.image if metadata and hasattr(metadata, "image") else None
 
     return {
         "title": metadata_title or "Untitled",

@@ -18,6 +18,7 @@ class Task:
     voice: Optional[str] = None
     bucket_id: Optional[str] = None
     retryCount: int = 0
+    userId: str | None = None
 
     def to_dict(self):
         """Convert dataclass to a dictionary, excluding None values."""

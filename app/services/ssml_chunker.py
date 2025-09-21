@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 import os
 import re
@@ -130,7 +131,7 @@ def text_to_ssml_fragments(
 
             fragment = fragment_builder(
                 chunk,
-                break_after=break_after and index == len(raw_chunks) - 1,
+                break_after and index == len(raw_chunks) - 1,
             )
             fragment_size = _fragment_size(fragment)
             if fragment_size > GOOGLE_TTS_MAX_INPUT_BYTES:

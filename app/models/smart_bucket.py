@@ -1,18 +1,19 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime
 
 
 @dataclass
-class Bucket:
+class SmartBucketRule:
+    field: str
+    operator: str
+    value: str
+
+
+@dataclass
+class SmartBucket:
     id: str | None = None
     name: str = ""
-    slug: str = ""
-    description: str = ""
-    rss_author_name: str | None = ""
-    rss_owner_email: str | None = ""
-    rss_cover_image_url: str | None = ""
-    itunes_categories: list[str] = field(default_factory=list)
+    rules: list[SmartBucketRule] = field(default_factory=list)
     createdAt: datetime | None = None
     updatedAt: datetime | None = None

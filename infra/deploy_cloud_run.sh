@@ -103,6 +103,29 @@ REVISION_SUFFIX=$(printf '%s-%s' "$APP_NAME_SLUG" "$GIT_SHA" | tr '[:upper:]' '[
 REVISION_SUFFIX=${REVISION_SUFFIX//_/}
 REVISION_SUFFIX=${REVISION_SUFFIX:0:62}
 REVISION_SUFFIX=${REVISION_SUFFIX%-}
+USE_REVISION_SUFFIX=true
+
+if [ -z "$REVISION_SUFFIX" ]; then
+    USE_REVISION_SUFFIX=false
+else
+    FULL_REVISION_NAME="${SERVICE_NAME}-${REVISION_SUFFIX}"
+    if gcloud run revisions describe "$FULL_REVISION_NAME" \
+        --platform=managed \
+        --region="$GCP_REGION" \
+        --project="$GCP_PROJECT_ID" >/dev/null 2>&1; then
+        EXTRA_TAG=$(/bin/date +%Y%m%d%H%M%S)
+        CANDIDATE_SUFFIX=$(printf '%s-%s' "$REVISION_SUFFIX" "$EXTRA_TAG")
+        CANDIDATE_SUFFIX=${CANDIDATE_SUFFIX:0:62}
+        CANDIDATE_SUFFIX=${CANDIDATE_SUFFIX%-}
+        if [ -n "$CANDIDATE_SUFFIX" ] && [ "$CANDIDATE_SUFFIX" != "$REVISION_SUFFIX" ]; then
+            log "Revision suffix '$REVISION_SUFFIX' exists; using '$CANDIDATE_SUFFIX' instead"
+            REVISION_SUFFIX="$CANDIDATE_SUFFIX"
+        else
+            log "Revision suffix '$REVISION_SUFFIX' exists and cannot be safely adjusted; allowing Cloud Run to auto-generate"
+            USE_REVISION_SUFFIX=false
+        fi
+    fi
+fi
 
 section "Pre-flight checks"
 
@@ -140,6 +163,13 @@ docker push "$LATEST_TAG"
 section "Preparing runtime configuration"
 ENV_FILE=$(/usr/bin/mktemp -t zissou-prod-env.XXXX.yaml)
 
+: "${AUTH_ENABLED:=false}"
+: "${FIREBASE_PROJECT_ID:=}"
+: "${FIREBASE_WEB_API_KEY:=}"
+: "${FIREBASE_AUTH_DOMAIN:=}"
+: "${SESSION_COOKIE_SECURE:=true}"
+: "${SESSION_COOKIE_NAME:=__zissou_session}"
+
 write_env_entry() {
     local key=$1
     local value=$2
@@ -159,6 +189,12 @@ write_env_entry "CLOUD_TASKS_QUEUE" "$CLOUD_TASKS_QUEUE"
 write_env_entry "CLOUD_TASKS_LOCATION" "$CLOUD_TASKS_LOCATION"
 write_env_entry "SERVICE_ACCOUNT_EMAIL" "$SERVICE_ACCOUNT_EMAIL"
 write_env_entry "SERVICE_URL" "$SERVICE_URL"
+write_env_entry "AUTH_ENABLED" "$AUTH_ENABLED"
+write_env_entry "FIREBASE_PROJECT_ID" "$FIREBASE_PROJECT_ID"
+write_env_entry "FIREBASE_WEB_API_KEY" "$FIREBASE_WEB_API_KEY"
+write_env_entry "FIREBASE_AUTH_DOMAIN" "$FIREBASE_AUTH_DOMAIN"
+write_env_entry "SESSION_COOKIE_SECURE" "$SESSION_COOKIE_SECURE"
+write_env_entry "SESSION_COOKIE_NAME" "$SESSION_COOKIE_NAME"
 
 section "Deploying to Cloud Run"
 DEPLOY_CMD=(
@@ -178,9 +214,13 @@ DEPLOY_CMD=(
     --timeout="$CLOUD_RUN_TIMEOUT"
     --env-vars-file="$ENV_FILE"
     --labels="env=production,service=${SERVICE_NAME},commit=${GIT_SHA}"
-    --revision-suffix="$REVISION_SUFFIX"
-    --quiet
 )
+
+if [ "$USE_REVISION_SUFFIX" = true ] && [ -n "$REVISION_SUFFIX" ]; then
+    DEPLOY_CMD+=("--revision-suffix=$REVISION_SUFFIX")
+fi
+
+DEPLOY_CMD+=("--quiet")
 
 "${DEPLOY_CMD[@]}"
 

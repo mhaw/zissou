@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from feedgen.feed import FeedGenerator
+from feedgen.feed import FeedGenerator  # type: ignore[import-untyped]
 from lxml import etree
 
 from .buckets import get_bucket_by_slug, list_buckets
@@ -101,7 +101,7 @@ def _guess_source_image(url: str | None) -> str | None:
     return None
 
 
-SUPPORTED_PODCAST_IMAGE_EXTENSIONS = ('.jpg', '.png')
+SUPPORTED_PODCAST_IMAGE_EXTENSIONS = (".jpg", ".png")
 
 
 def _is_supported_podcast_image_url(url: str | None) -> bool:
@@ -116,7 +116,10 @@ def _choose_podcast_image_candidate(*candidates: str | None) -> str | None:
             continue
         if _is_supported_podcast_image_url(candidate):
             return candidate
-        logger.debug("Skipping unsupported podcast image (must end with .jpg or .png): %s", candidate)
+        logger.debug(
+            "Skipping unsupported podcast image (must end with .jpg or .png): %s",
+            candidate,
+        )
     return None
 
 
@@ -138,7 +141,7 @@ def generate_feed_for_bucket(
         raise ValueError(f"Bucket with slug '{bucket_slug}' not found.")
 
     list_items_fn = getattr(list_items, "__wrapped__", list_items)
-    all_items, _ = list_items_fn(bucket_id=bucket.id, limit=200)
+    all_items, _ = list_items_fn(user_id="dummy_user_id", bucket_slug=bucket.slug, limit=200)
 
     per_page = 50
     start_index = (page - 1) * per_page

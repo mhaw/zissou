@@ -1,17 +1,25 @@
+from __future__ import annotations
 import os
-from google.cloud import firestore
+from google.cloud import firestore  # type: ignore[attr-defined]
 from google.cloud.exceptions import GoogleCloudError
 from app.models.item import Item
 from datetime import datetime
 import logging
 from cachetools import cached, TTLCache
+from typing import Optional, List, Tuple
 from app.services.firestore_helpers import (
     clear_cached_functions,
     ensure_db_client,
     normalise_timestamp,
 )
+from app.services import users as users_service
+import random
 
 logger = logging.getLogger(__name__)
+
+FIRESTORE_COLLECTION_ITEMS = os.getenv("FIRESTORE_COLLECTION_ITEMS", "items")
+
+FIRESTORE_COLLECTION_ITEMS = os.getenv("FIRESTORE_COLLECTION_ITEMS", "items")
 
 # Initialize the Firestore client once at the module level.
 try:
@@ -54,10 +62,10 @@ def _doc_to_item(doc) -> Item:
             item_data[date_field] = normalised
 
     # Filter out unexpected fields to prevent errors
-    item_fields = set(Item.__dataclass_fields__)
-    filtered_data = {k: v for k, v in item_data.items() if k in item_fields}
+    # item_fields = set(Item.__dataclass_fields__)
+    # filtered_data = {k: v for k, v in item_data.items() if k in item_fields}
 
-    return Item(**filtered_data)
+    return Item.from_dict(item_data)
 
 
 @cached(cache=TTLCache(maxsize=128, ttl=600))
@@ -109,82 +117,132 @@ def find_item_by_source_url(source_url: str) -> Item | None:
         ) from e
 
 
-@cached(cache=TTLCache(maxsize=128, ttl=600))
+
+
+def get_random_unread_item(user_id: str) -> Item | None:
+    """Retrieves a random unread item for the given user."""
+    ensure_db_client(
+        db,
+        FirestoreError,
+        "Firestore client is not initialized. Check application startup logs.",
+    )
+    try:
+        items_ref = db.collection(FIRESTORE_COLLECTION_ITEMS)
+        query = items_ref.where("userId", "==", user_id).where("is_read", "==", False).where("is_archived", "==", False)
+        
+        # Firestore doesn't support random ordering directly. 
+        # Fetch a small, random sample and pick one.
+        # This approach has limitations for very large collections.
+        docs = list(query.limit(100).stream())
+        if not docs:
+            return None
+        
+        random_doc = random.choice(docs)
+        return Item.from_dict(random_doc.to_dict())
+    except GoogleCloudError as e:
+        logger.error(f"Firestore error getting random unread item for user {user_id}: {e}")
+        raise FirestoreError(f"Failed to get random unread item for user {user_id}.") from e
+
+
+def toggle_read_status(item_id: str, user_id: str) -> Item:
+    """Toggles the read status of an item."""
+    _require_db()
+    item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(item_id)
+    item_doc = item_ref.get()
+
+    if not item_doc.exists:
+        raise ValueError(f"Item with ID {item_id} not found.")
+
+    item_data = item_doc.to_dict()
+    if item_data.get("userId") != user_id:
+        raise PermissionError("User does not have permission to modify this item.")
+
+    current_read_status = item_data.get("is_read", False)
+    new_read_status = not current_read_status
+    item_ref.update({"is_read": new_read_status})
+
+    # Update user statistics
+    user = users_service.get_user(user_id)
+    if user:
+        update_data = {}
+        if new_read_status:
+            update_data["articles_listened_to"] = user.articles_listened_to + 1
+            if item_data.get("reading_time"):
+                update_data["total_listening_time"] = user.total_listening_time + item_data["reading_time"]
+        else:
+            # If marking unread, decrement stats (ensure not to go below zero)
+            update_data["articles_listened_to"] = max(0, user.articles_listened_to - 1)
+            if item_data.get("reading_time"):
+                update_data["total_listening_time"] = max(0, user.total_listening_time - item_data["reading_time"])
+        
+        if update_data:
+            users_service.update_user(user_id, update_data)
+
+    # Retrieve the updated item
+    updated_item_doc = item_ref.get()
+    return Item.from_dict(updated_item_doc.to_dict())
+
+
 def list_items(
-    q: str = None,
-    sort: str = "-createdAt",
-    tags: tuple[str, ...] | None = None,
-    bucket_id: str = None,
-    duration: str = None,
-    after: str = None,
-    limit: int = 25,
-) -> tuple[list[Item], str | None]:
-    """Lists all items with filtering, sorting, and cursor-based pagination.
-    Returns a tuple containing the list of items and the next_cursor (item_id) or None.
+    user_id: Optional[str],
+    bucket_slug: Optional[str] = None,
+    search_query: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    sort_by: str = "newest",
+    cursor: Optional[str] = None,
+    limit: int = 20,
+    include_archived: bool = False,
+    include_read: bool = False,
+) -> Tuple[List[Item], str | None]:
+    """
+    Lists items for a user with various filtering, sorting, and pagination options.
     """
     _require_db()
     try:
         items_ref = db.collection(os.getenv("FIRESTORE_COLLECTION_ITEMS"))
         query = items_ref
 
-        # Apply filters
-        if bucket_id:
-            query = query.where("buckets", "array_contains", bucket_id)
+        if user_id:
+            query = query.where("userId", "==", user_id)
+        else:
+            query = query.where("is_public", "==", True)
+
+        if bucket_slug:
+            query = query.where("buckets", "array_contains", bucket_slug)
+
+        if search_query:
+            # This is a simplified search. Full-text search would require a dedicated service.
+            query = query.order_by("title").start_at(search_query).end_at(search_query + "\uf8ff")
+
         if tags:
-            if len(tags) == 1:
-                query = query.where("tags", "array_contains", tags[0])
-            else:
-                query = query.where("tags", "array_contains_any", list(tags[:10]))
+            query = query.where("tags", "array_contains_any", tags)
 
-        # Duration filter
-        if duration == "short":  # < 5 minutes
-            query = query.where("durationSeconds", "<", 300)
-        elif duration == "medium":  # 5-15 minutes
-            query = query.where("durationSeconds", ">=", 300).where(
-                "durationSeconds", "<=", 900
-            )
-        elif duration == "long":  # > 15 minutes
-            query = query.where("durationSeconds", ">", 900)
+        if not include_archived:
+            query = query.where("is_archived", "==", False)
 
-        # Search query (basic title search for now due to Firestore limitations)
-        # For full-text search across multiple fields (title, source host, tags),
-        # a dedicated search service (e.g., Algolia, ElasticSearch) or a more complex
-        # Firestore indexing strategy would be required.
-        if q:
-            # This performs a prefix match, not a 'contains' search.
-            # For 'contains', client-side filtering or a dedicated search index is needed.
-            query = query.order_by("title").start_at([q]).end_at([q + "\uf8ff"])
+        if not include_read:
+            query = query.where("is_read", "==", False)
 
         # Apply sorting
-        sort_direction = (
-            firestore.Query.DESCENDING
-            if sort.startswith("-")
-            else firestore.Query.ASCENDING
-        )
-        sort_field = sort.lstrip("-")
+        if sort_by == "newest":
+            query = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
+        elif sort_by == "oldest":
+            query = query.order_by("createdAt", direction=firestore.Query.ASCENDING)
+        elif sort_by == "title":
+            query = query.order_by("title", direction=firestore.Query.ASCENDING)
+        elif sort_by == "-title":
+            query = query.order_by("title", direction=firestore.Query.DESCENDING)
+        elif sort_by == "durationSeconds":
+            query = query.order_by("durationSeconds", direction=firestore.Query.ASCENDING)
+        elif sort_by == "-durationSeconds":
+            query = query.order_by("durationSeconds", direction=firestore.Query.DESCENDING)
 
-        # Ensure consistent ordering for pagination, especially if sort_field is not unique
-        if (
-            sort_field != "createdAt"
-        ):  # Always order by createdAt for consistent pagination if not primary sort
-            query = query.order_by(sort_field, direction=sort_direction).order_by(
-                "createdAt", direction=firestore.Query.DESCENDING
-            )
-        else:
-            query = query.order_by(sort_field, direction=sort_direction)
-
-        # Cursor-based pagination
-        if after:
-            # Fetch the document corresponding to the 'after' cursor
-            start_after_doc = items_ref.document(after).get()
+        # Apply pagination
+        if cursor:
+            start_after_doc = items_ref.document(cursor).get()
             if start_after_doc.exists:
                 query = query.start_after(start_after_doc)
-            else:
-                logger.warning(
-                    f"Cursor document {after} not found. Starting from beginning."
-                )
 
-        # Fetch one extra item to determine if there's a next page
         docs = query.limit(limit + 1).stream()
         items = [_doc_to_item(doc) for doc in docs]
 
@@ -196,26 +254,27 @@ def list_items(
         return items, next_cursor
 
     except GoogleCloudError as e:
-        logger.error(f"Firestore error listing items: {e}")
-        raise FirestoreError("Failed to list items from Firestore.") from e
+        logger.error(f"Firestore error listing items for user {user_id}: {e}")
+        raise FirestoreError(f"Failed to list items for user {user_id} from Firestore.") from e
     except Exception as e:
-        logger.error(f"Unexpected error listing items: {e}")
-        raise FirestoreError("An unexpected error occurred while listing items.") from e
+        logger.error(f"Unexpected error listing items for user {user_id}: {e}")
+        raise FirestoreError(f"An unexpected error occurred while listing items for user {user_id}.") from e
 
-
-def create_item(item: Item) -> str:
+def create_item(item: Item, user_id: str) -> str:
     """Creates a new item in Firestore and returns its ID."""
     _require_db()
     try:
         item_ref = db.collection(os.getenv("FIRESTORE_COLLECTION_ITEMS")).document()
 
+        item.userId = user_id
         item_data = item.__dict__
         item_data["createdAt"] = datetime.utcnow()
         item_data["updatedAt"] = datetime.utcnow()
+        if item.reading_time is not None:
+            item_data["reading_time"] = item.reading_time
 
-        item_ref.set(item_data)
         clear_cached_functions(
-            get_item, list_items, find_item_by_source_url, get_all_unique_tags
+            get_item, list_items, find_item_by_source_url, get_all_unique_tags  # type: ignore[arg-type]
         )
         return item_ref.id
     except GoogleCloudError as e:
@@ -271,6 +330,29 @@ def update_item_tags(item_id: str, tags: list[str]):
         logger.error(f"Unexpected error updating tags for item {item_id}: {e}")
         raise FirestoreError(
             f"An unexpected error occurred while updating tags for item {item_id}."
+        ) from e
+
+def update_item_archived_status(item_id: str, is_archived: bool):
+    """Updates the archived status of a given item."""
+    _require_db()
+    try:
+        item_ref = db.collection(os.getenv("FIRESTORE_COLLECTION_ITEMS")).document(
+            item_id
+        )
+
+        item_ref.update({"is_archived": is_archived, "updatedAt": datetime.utcnow()})
+        clear_cached_functions(
+            get_item, list_items, find_item_by_source_url, get_all_unique_tags
+        )
+    except GoogleCloudError as e:
+        logger.error(f"Firestore error updating archived status for item {item_id}: {e}")
+        raise FirestoreError(
+            f"Failed to update archived status for item {item_id} in Firestore."
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error updating archived status for item {item_id}: {e}")
+        raise FirestoreError(
+            f"An unexpected error occurred while updating archived status for item {item_id}."
         ) from e
 
 

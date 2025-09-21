@@ -3,7 +3,7 @@ import os
 import time
 from urllib.parse import quote, urlparse
 
-from google.cloud import storage
+from google.cloud import storage  # type: ignore[attr-defined]
 from google.cloud.exceptions import GoogleCloudError, NotFound
 
 logger = logging.getLogger(__name__)

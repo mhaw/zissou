@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 
+from app.auth import require_roles
 from app.services import (
     buckets as buckets_service,
     items as items_service,
@@ -22,6 +23,11 @@ from app.services.tasks import (
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 logger = logging.getLogger(__name__)
+
+
+@bp.before_request
+def enforce_admin_role():
+    return require_roles("admin")
 
 
 def _parse_list_params():

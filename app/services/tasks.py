@@ -2,16 +2,14 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+from typing import Optional, Any
 
-from google.cloud import firestore
+from google.cloud import firestore  # type: ignore[attr-defined]
 from google.cloud.exceptions import GoogleCloudError
 from google.cloud.tasks_v2 import CloudTasksClient
 
 from app.models.task import Task
 from app.services.items import db, FirestoreError
-
-# For local development synchronous processing
-from app.routes.tasks import process_article_task
 
 
 logger = logging.getLogger(__name__)
@@ -107,7 +105,7 @@ def create_cloud_task(task_payload: dict):
         raise ValueError("Cloud Tasks environment is not configured.")
 
     client = CloudTasksClient()
-    parent = client.queue_path(project, location, queue)
+    parent = client.queue_path(project, location, queue) # type: ignore[arg-type]
 
     task = {
         "http_request": {
@@ -122,7 +120,7 @@ def create_cloud_task(task_payload: dict):
     }
 
     try:
-        response = client.create_task(parent=parent, task=task)
+        response = client.create_task(parent=parent, task=task)  # type: ignore[arg-type]
         logger.info(f"Created Cloud Task: {response.name}")
         return response
     except GoogleCloudError as e:
@@ -130,7 +128,7 @@ def create_cloud_task(task_payload: dict):
         raise
 
 
-def create_task(url: str, voice: str = None, bucket_id: str = None) -> str:
+def create_task(url: str, voice: Optional[str] = None, bucket_id: Optional[str] = None, user: Any = None) -> str:
     """
     Creates a task document in Firestore and, if in a deployed environment,
     enqueues a corresponding task in Google Cloud Tasks.
@@ -138,12 +136,20 @@ def create_task(url: str, voice: str = None, bucket_id: str = None) -> str:
     """
     _ensure_db_client()
     try:
+        if user and user.default_voice:
+            voice = user.default_voice
+        if user and user.default_bucket_id and not bucket_id:
+            bucket_id = user.default_bucket_id
+
         task = Task(sourceUrl=url, voice=voice, bucket_id=bucket_id)
+        if user:
+            task.userId = user["uid"]
         task_ref = db.collection(TASKS_COLLECTION).document()
         task.id = task_ref.id
 
         # Local development: process synchronously
         if os.getenv("ENV") == "development":
+            from app.routes.tasks import process_article_task
             logger.info(f"Processing task {task.id} synchronously in local dev.")
             task.status = "PROCESSING"
             task_ref.set(task.to_dict())
@@ -159,6 +165,7 @@ def create_task(url: str, voice: str = None, bucket_id: str = None) -> str:
             "url": url,
             "voice": voice,
             "bucket_id": bucket_id,
+            "user_id": task.userId,
         }
         create_cloud_task(task_payload)
 
@@ -187,6 +194,7 @@ def retry_task(task: Task) -> str:
     now = datetime.utcnow()
 
     if os.getenv("ENV") == "development":
+        from app.routes.tasks import process_article_task
         update_fields = {
             "status": "PROCESSING",
             "updatedAt": now,
@@ -232,6 +240,24 @@ def get_task(task_id: str) -> Task | None:
         logger.error(f"Firestore error getting task {task_id}: {e}")
         raise FirestoreError(f"Failed to get task {task_id}.") from e
 
+def get_task_by_source_url(source_url: str) -> Task | None:
+    """Retrieves the most recent task for a given source URL."""
+    _ensure_db_client()
+    try:
+        tasks_ref = db.collection(TASKS_COLLECTION)
+        query = (
+            tasks_ref.where("sourceUrl", "==", source_url)
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(1)
+        )
+        docs = list(query.stream())
+        if not docs:
+            return None
+        return _doc_to_task(docs[0])
+    except GoogleCloudError as e:
+        logger.error(f"Firestore error getting task by source URL {source_url}: {e}")
+        raise FirestoreError(f"Failed to get task by source URL {source_url}.") from e
+
 
 def claim_task_for_processing(task_id: str) -> tuple[str, Task | None]:
     """Atomically transition a queued task to PROCESSING.
@@ -270,9 +296,9 @@ def claim_task_for_processing(task_id: str) -> tuple[str, Task | None]:
 def update_task(
     task_id: str,
     status: str,
-    item_id: str = None,
-    error: str = None,
-    error_code: str = None,
+    item_id: Optional[str] = None,
+    error: Optional[str] = None,
+    error_code: Optional[str] = None,
 ):
     """Updates the status and other fields of a task document."""
     _ensure_db_client()
@@ -299,7 +325,7 @@ def _doc_to_task(doc) -> Task:
 
 def list_tasks(
     sort: str = "-createdAt",
-    after: str = None,
+    after: Optional[str] = None,
     limit: int = 50,
     status: str | None = None,
 ) -> tuple[list[Task], str | None]:

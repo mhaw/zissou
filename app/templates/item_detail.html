@@ -52,11 +52,27 @@
 
 {% block content %}
 <div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md">
-    <div class="mb-4">
+    <div class="mb-4 flex justify-between items-center">
         <a href="{{ url_for('main.index') }}" class="text-blue-500 hover:underline">&larr; Back to List</a>
+        <form action="{{ url_for('main.archive_item', item_id=item.id) }}" method="post">
+            <button type="submit" class="inline-flex items-center gap-2 rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4H5z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 12H5a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2z" />
+                </svg>
+                {{ 'Unarchive' if item.is_archived else 'Archive' }}
+            </button>
+        </form>
     </div>
     <h1 class="text-3xl font-bold mb-2">{{ item.title }}</h1>
     <p class="text-gray-600 mb-4">By {{ item.author | default('Unknown Author') }}</p>
+
+    {% if task and task.status == 'FAILED' %}
+    <div class="my-4 p-4 rounded bg-red-200 text-red-800">
+        <h3 class="font-bold">Processing Failed</h3>
+        <p>{{ task.error }}</p>
+    </div>
+    {% endif %}
 
     {% if item.imageUrl %}
     <div class="my-4">
@@ -106,9 +122,42 @@
                 <div class="h-full w-0 bg-blue-500 transition-[width] duration-150 ease-out" data-audio-progress-bar></div>
             </div>
         </div>
+        <div class="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
+            <div class="flex items-center gap-2">
+                <button type="button" data-audio-skip="-10" class="p-3 rounded-full hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Skip back 10 seconds">
+                    <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <button type="button" data-audio-play-pause class="p-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Play">
+                    <svg data-play-icon class="h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <svg data-pause-icon class="h-8 w-8 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </button>
+                <button type="button" data-audio-skip="10" class="p-3 rounded-full hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Skip forward 10 seconds">
+                    <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                </button>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="relative" data-playback-rate-selector>
+                    <button type="button" class="text-sm font-medium text-slate-600 hover:text-slate-800" aria-label="Playback speed">1x</button>
+                    <div class="absolute bottom-full mb-2 w-24 bg-white rounded-lg shadow-lg border border-slate-200 hidden">
+                        <button type="button" data-rate="0.75" class="block w-full text-left px-4 py-2 text-sm hover:bg-slate-50">0.75x</button>
+                        <button type="button" data-rate="1" class="block w-full text-left px-4 py-2 text-sm hover:bg-slate-50 bg-slate-100">1x</button>
+                        <button type="button" data-rate="1.25" class="block w-full text-left px-4 py-2 text-sm hover:bg-slate-50">1.25x</button>
+                        <button type="button" data-rate="1.5" class="block w-full text-left px-4 py-2 text-sm hover:bg-slate-50">1.5x</button>
+                        <button type="button" data-rate="2" class="block w-full text-left px-4 py-2 text-sm hover:bg-slate-50">2x</button>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2" data-volume-control>
+                    <button type="button" data-mute-toggle class="p-3 rounded-full hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-300" aria-label="Mute">
+                        <svg data-volume-high-icon class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                        <svg data-volume-low-icon class="h-6 w-6 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                        <svg data-volume-muted-icon class="h-6 w-6 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                    </button>
+                    <input type="range" min="0" max="1" step="0.05" value="1" class="w-24" data-volume-slider aria-label="Volume">
+                </div>
+            </div>
+        </div>
         <audio id="article-audio"
-               class="w-full"
-               controls
+               class="w-full hidden"
                preload="metadata"
                playsinline
                title="{{ item.title or 'Untitled Article' }}"
@@ -128,6 +177,9 @@
         </p>
         {% if item.audioSizeBytes %}
         <p><strong>Audio Size:</strong> {{ '%.2f'|format(item.audioSizeBytes / 1024 / 1024) }} MB</p>
+        {% endif %}
+        {% if item.reading_time %}
+        <p><strong>Reading Time:</strong> {{ item.reading_time }} minutes</p>
         {% endif %}
     </div>
 

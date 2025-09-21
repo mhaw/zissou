@@ -111,16 +111,19 @@
         <input type="hidden" name="q" value="{{ params.q or '' }}">
         <div class="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
             <div>
-                <label for="sort" class="mb-2 block text-sm font-semibold text-slate-700">Sort By</label>
-                <select id="sort" name="sort" class="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        onchange="this.form.submit()">
-                    <option value="-createdAt" {% if params.sort == '-createdAt' %}selected{% endif %}>Newest First</option>
-                    <option value="createdAt" {% if params.sort == 'createdAt' %}selected{% endif %}>Oldest First</option>
-                    <option value="title" {% if params.sort == 'title' %}selected{% endif %}>Title (A-Z)</option>
-                    <option value="-title" {% if params.sort == '-title' %}selected{% endif %}>Title (Z-A)</option>
-                    <option value="durationSeconds" {% if params.sort == 'durationSeconds' %}selected{% endif %}>Duration (Shortest)</option>
-                    <option value="-durationSeconds" {% if params.sort == '-durationSeconds' %}selected{% endif %}>Duration (Longest)</option>
-                </select>
+                <label for="include_archived" class="mb-2 block text-sm font-semibold text-slate-700">Archived Items</label>
+                <input type="checkbox" id="include_archived" name="include_archived" value="true" {% if params.include_archived %}checked{% endif %}
+                       class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       onchange="this.form.submit()">
+                <label for="include_archived" class="ml-2 text-sm text-slate-700">Show archived items</label>
+            </div>
+
+            <div>
+                <label for="include_read" class="mb-2 block text-sm font-semibold text-slate-700">Read Items</label>
+                <input type="checkbox" id="include_read" name="include_read" value="true" {% if params.include_read %}checked{% endif %}
+                       class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       onchange="this.form.submit()">
+                <label for="include_read" class="ml-2 text-sm text-slate-700">Show read items</label>
             </div>
 
             {% if buckets %}
