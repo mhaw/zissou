@@ -139,10 +139,7 @@ def session_login():
     response.set_cookie(
         FB_COOKIE,
         session_cookie,
-        max_age=int(expires_in.total_seconds()),
-        secure=True,
-        httponly=True,
-        samesite="None",
+        samesite="Lax",
         path="/",
     )
 
@@ -216,7 +213,7 @@ def logout():
         expires=0,
         secure=True,
         httponly=True,
-        samesite="None",
+        samesite="Lax",
         path="/",
     )
 
