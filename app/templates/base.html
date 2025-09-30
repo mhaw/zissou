@@ -1,25 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Zissou{% endblock %}</title>
-
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/zissou_favicon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <link rel="icon" href="{{ url_for('static', filename='img/zissou_favicon.png') }}">
-    {% block meta %}
-    <meta name="description" content="Zissou: Convert articles to audio and generate RSS feeds.">
-    <meta property="og:type" content="website">
-    <meta property="og:site_name" content="Zissou">
-    <meta property="og:title" content="Zissou">
-    <meta property="og:description" content="Convert articles to audio and generate RSS feeds.">
-    <meta property="og:image" content="{{ url_for('static', filename='img/zissou_logo.png') }}">
-    <meta property="og:url" content="{{ request.url }}">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Zissou">
-    <meta name="twitter:description" content="Convert articles to audio and generate RSS feeds.">
-    <meta name="twitter:image" content="{{ url_for('static', filename='img/zissou_logo.png') }}">
-    {% endblock %}
+    <script src="{{ url_for('static', filename='js/htmx.min.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/htmx-ext-response-targets.js') }}" defer></script>
+    {% block head %}{% endblock %}
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans">
     <div class="container mx-auto p-4">

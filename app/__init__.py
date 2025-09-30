@@ -202,6 +202,8 @@ def create_app():
             "'self'",
             f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}",
             "https://www.googleapis.com",
+            "https://www.gstatic.com",
+            "https://securetoken.googleapis.com",
         ],
         "style-src": ["'self'"],
         "img-src": ["'self'", "data:"],
