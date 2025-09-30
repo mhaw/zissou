@@ -3,7 +3,7 @@ import logging
 
 import firebase_admin  # type: ignore[import-untyped]
 from dotenv import load_dotenv
-from flask import Flask, request, redirect
+from flask import Flask, g, request, redirect
 
 from app.extensions import cache, limiter
 from app.utils.logging_config import setup_logging
