@@ -6,8 +6,8 @@
     <title>{% block title %}Zissou{% endblock %}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/zissou_favicon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <script src="{{ url_for('static', filename='js/htmx.min.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='js/htmx-ext-response-targets.js') }}" defer></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js" defer></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/response-targets.js" defer></script>
     {% block head %}{% endblock %}
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans">
