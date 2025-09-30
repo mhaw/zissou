@@ -6,7 +6,19 @@ This document captures the narrow set of changes required to enable Google-only 
 - Firebase project enabled for Authentication (Google provider only).
 - The Firebase web app configuration (API key, auth domain, project ID).
 - Application Default Credentials available in the runtime (Cloud Run provides this automatically).
-- Populate `.env` (or Cloud Run environment variables) with the keys listed in `.env.example`.
+- Populate `.env` (or Cloud Run environment variables) with the keys listed in `.env.example`).
+
+## Content Security Policy (CSP)
+To ensure the security of the application, a Content Security Policy is enforced using Flask-Talisman. This policy helps mitigate Cross-Site Scripting (XSS) attacks by specifying which sources of content are allowed to be loaded and executed by the browser.
+
+**Key Directives for Firebase Authentication:**
+- `script-src`: Allows scripts from `'self'`, `https://www.gstatic.com` (for Firebase SDK), `https://apis.google.com`, and `https://unpkg.com`. Inline scripts are permitted via dynamically generated nonces.
+- `connect-src`: Allows connections to `'self'`, `https://securetoken.googleapis.com`, and `https://identitytoolkit.googleapis.com` for Firebase authentication processes.
+- `report-uri`: CSP violations are reported to `/csp-violation-report` for monitoring and debugging.
+
+**Nonce Implementation:**
+Inline `<script>` tags are secured using nonces. Flask-Talisman automatically generates a unique nonce for each request and injects it into the `script-src` header. All inline scripts in the templates must include `nonce="{{ csp_nonce() }}"` to be executed.
+
 
 ## Local Setup
 1. Copy `.env.example` to `.env` and fill in:

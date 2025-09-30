@@ -190,7 +190,7 @@
     </form>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce() }}">
     (function() {
         const filterToggle = document.getElementById('filter-toggle');
         const quickClear = document.getElementById('quick-clear-filters');

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Content Security Policy (CSP)**: Implemented a strict, nonce-based CSP to mitigate XSS attacks. The policy is configured to allow the necessary Firebase domains for authentication while blocking untrusted scripts and resources. A reporting endpoint has been added to monitor for violations.
+
+
 ### Added
 - **Environment validation**: Application startup now fails fast with a clear error when required Cloud Tasks or Firebase env vars are missing.
 - **User-Specific Voices**: Users can now set a default voice for their articles in their profile.

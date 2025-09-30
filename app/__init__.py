@@ -209,9 +209,37 @@ def create_app():
         "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='", "data:"],
         "img-src": ["'self'", "data:"],
         "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
+        "connect-src": [
+            "'self'",
+            "https://securetoken.googleapis.com",
+            "https://identitytoolkit.googleapis.com",
+        ],
     }
 
-    Talisman(app, content_security_policy=content_security_policy)
+    Talisman(
+        app,
+        content_security_policy=content_security_policy,
+        content_security_policy_nonce_in=["script-src"],
+    )
+
+    content_security_policy = {
+        "default-src": ["'self'"],
+        "script-src": [
+            "'self'",
+            "https://www.gstatic.com",
+            "https://apis.google.com",
+            "https://unpkg.com",
+        ],
+        "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='", "data:"],
+        "img-src": ["'self'", "data:"],
+        "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
+        "connect-src": [
+            "'self'",
+            "https://securetoken.googleapis.com",
+            "https://identitytoolkit.googleapis.com",
+        ],
+        "report-uri": "/csp-violation-report",
+    }
 
     cache.init_app(app)
 

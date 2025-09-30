@@ -62,7 +62,7 @@
 
 {% block scripts %}
 {{ super() }}
-<script>
+<script nonce="{{ csp_nonce() }}">
     document.addEventListener('DOMContentLoaded', () => {
         const copyButton = document.querySelector('[data-copy-bookmarklet]');
         const feedback = document.querySelector('[data-bookmarklet-feedback]');

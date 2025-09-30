@@ -12,7 +12,7 @@
     <p id="status-message" class="text-lg font-semibold text-blue-700">Starting...</p>
     <p id="error-message" class="text-red-500 mt-4"></p>
 
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         const taskId = "{{ task_id }}";
         const statusMessage = document.getElementById('status-message');
         const errorMessage = document.getElementById('error-message');

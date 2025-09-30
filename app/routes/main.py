@@ -922,3 +922,17 @@ def delete_account():
     except users_service.FirestoreError as e:
         logger.error(f"Failed to delete account for user {g.user['uid']}: {e}")
         return jsonify({"error": "Failed to delete account."}), 500
+
+
+@bp.route("/csp-violation-report", methods=["POST"])
+def csp_report():
+    """Logs CSP violation reports."""
+    try:
+        report = request.get_json(silent=True)
+        if report:
+            logger.warning("CSP Violation: %s", report)
+        else:
+            logger.warning("Received an empty or invalid CSP report.")
+    except Exception as e:
+        logger.error("Error processing CSP report: %s", e)
+    return "", 204

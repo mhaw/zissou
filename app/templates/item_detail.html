@@ -286,7 +286,7 @@
 {% block scripts %}
 {{ super() }}
 <script src="{{ url_for('static', filename='js/item-detail.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce() }}">
     (function() {
         const copyButton = document.querySelector('[data-copy-source]');
         const feedback = document.getElementById('copy-feedback');

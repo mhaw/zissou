@@ -43,7 +43,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce() }}">
     document.addEventListener('DOMContentLoaded', function() {
         const rulesContainer = document.getElementById('rules-container');
         const addRuleButton = document.getElementById('add-rule');
