@@ -1,0 +1,19 @@
+# Codex CLI configuration for the Zissou project.
+
+[project]
+name = "zissou"
+description = "Flask service for audio content management"
+
+[environment]
+python = ".venv/bin/python"
+
+[commands]
+setup = "make setup"
+format = "make fmt"
+lint = "make lint"
+test = "make test"
+run = "make dev"
+
+[paths]
+source = "app"
+tests = "tests"

@@ -17,10 +17,11 @@ from flask import (
     render_template,
     request,
     session,
+    url_for,
 )
 from firebase_admin import auth as firebase_auth  # type: ignore[import-untyped]
 
-from app.auth import build_user_context, _verify_session_cookie
+from app.constants import FB_COOKIE
 from app.extensions import csrf, limiter
 from app.services import users as users_service
 
@@ -31,38 +32,7 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 bp = auth_bp
 
 
-@auth_bp.before_app_request
-def refresh_session_cookie():
-    """Warn when a cookie is about to expire so clients can reauthenticate."""
-    user_ctx = getattr(g, "user", None)
-    if user_ctx and request.endpoint not in ["static", "auth.logout"]:
-        claims = g.get("claims")
-        if claims:
-            expiry_time = datetime.fromtimestamp(claims["exp"])
-            now = datetime.utcnow()
-            threshold = timedelta(hours=24)
 
-            if expiry_time - now < threshold:
-                logger.debug(
-                    "Session cookie approaching expiry for %s; prompting client refresh.",
-                    user_ctx.get("uid"),
-                )
-
-
-@auth_bp.before_app_request
-def attach_authenticated_user():
-    """Attach the authenticated user to the request context."""
-    g.claims = None
-    g.user = None
-
-    if not current_app.config.get("AUTH_ENABLED", False):
-        return None
-
-    claims = _verify_session_cookie()
-    if claims:
-        g.claims = claims
-        g.user = build_user_context(claims)
-    return None
 
 
 @auth_bp.get("/login")
@@ -96,13 +66,13 @@ def session_login():
     if not current_app.config.get("AUTH_ENABLED", False):
         return jsonify({"error": "auth disabled"}), 403
 
-    session_cookie_name = current_app.config.get(
-        "SESSION_COOKIE_NAME", "__zissou_session"
-    )
     session_lifetime_days = current_app.config.get("SESSION_COOKIE_LIFETIME_DAYS", 5)
     payload = request.get_json(silent=True) or request.form
     id_token = payload.get("idToken") if payload else None
     remember_me = payload.get("rememberMe") if payload else False
+    next_url = payload.get("next") if payload else None
+    if not next_url:
+        next_url = request.args.get("next")
 
     if not id_token:
         return jsonify({"error": "missing idToken"}), 400
@@ -165,19 +135,14 @@ def session_login():
         logger.error(f"Failed to get or create user: {e}")
         return jsonify({"error": "internal server error"}), 500
 
-    user_context = build_user_context(decoded_id_token, user.to_dict())
-
-    response_data = {"status": "ok", "user": user.to_dict(), "is_new_user": is_new_user}
-    response = make_response(jsonify(response_data))
-    secure_flag = current_app.config.get("SESSION_COOKIE_SECURE", True)
-
+    response = make_response(redirect(next_url or url_for("main.index")))
     response.set_cookie(
-        session_cookie_name,
+        FB_COOKIE,
         session_cookie,
         max_age=int(expires_in.total_seconds()),
+        secure=True,
         httponly=True,
-        secure=secure_flag,
-        samesite="None",
+        samesite="Lax",
         path="/",
     )
 
@@ -192,20 +157,11 @@ def session_login():
             "email": user.email,
             "role": user.role,
             "auth_method": auth_method,
+            "is_new_user": is_new_user,
             "ip": request.remote_addr,
         },
     )
 
-    if is_new_user:
-        flash(
-            f"Welcome to Zissou, {user_context.get('name') or user_context.get('email')}! Please take a moment to set your preferences.",
-            "success",
-        )
-    else:
-        flash(
-            f"Welcome back, {user_context.get('name') or user_context.get('email')}!",
-            "success",
-        )
     return response
 
 
@@ -216,6 +172,26 @@ def logout():
         abort(403)
 
     user = g.user
+    if not user:
+        cookie = request.cookies.get(FB_COOKIE)
+        if cookie:
+            try:
+                claims = firebase_auth.verify_session_cookie(cookie, check_revoked=True)
+                g.claims = claims
+                user = build_user_context(claims)
+                g.user = user
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.info(
+                    "Session cookie unavailable during logout",
+                    extra={
+                        "auth_event": "logout_cookie_missing",
+                        "reason": str(exc),
+                        "exception": exc.__class__.__name__,
+                        "path": request.path,
+                        "ip": request.remote_addr,
+                    },
+                )
+
     if user and user.get("uid"):
         try:
             firebase_auth.revoke_refresh_tokens(user.get("uid"))
@@ -233,21 +209,15 @@ def logout():
             )
 
     session.clear()
-    session_cookie_name = current_app.config.get(
-        "SESSION_COOKIE_NAME", "__zissou_session"
-    )
-
     response = make_response(jsonify({"status": "ok"}))
-    secure_flag = current_app.config.get("SESSION_COOKIE_SECURE", True)
     response.set_cookie(
-        session_cookie_name,
+        FB_COOKIE,
         "",
         expires=0,
-        max_age=0,
-        path="/",
-        secure=secure_flag,
+        secure=True,
         httponly=True,
-        samesite="None",
+        samesite="Lax",
+        path="/",
     )
 
     if user:

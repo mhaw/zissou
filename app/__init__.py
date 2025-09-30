@@ -3,7 +3,7 @@ import logging
 
 import firebase_admin  # type: ignore[import-untyped]
 from dotenv import load_dotenv
-from flask import Flask, request, abort, redirect
+from flask import Flask, request, redirect
 
 from app.extensions import cache, limiter
 from app.utils.logging_config import setup_logging
@@ -104,13 +104,20 @@ def create_app():
         cache_defaults["CACHE_REDIS_URL"] = redis_url
 
     secret_key = os.getenv("FLASK_SECRET_KEY") or os.getenv("SECRET_KEY") or "dev"
-    session_cookie_name = os.getenv("SESSION_COOKIE_NAME", "__zissou_session")
-    is_prod = os.getenv("ENV") == "production"
+    env_name = os.getenv("ENV", "").strip().lower()
+    is_development = env_name == "development"
     auth_enabled = os.getenv("AUTH_ENABLED", "false").lower() == "true"
-    session_cookie_secure = (
-        os.getenv("SESSION_COOKIE_SECURE", str(is_prod)).lower() == "true"
-    )
-    session_cookie_samesite = "None" if session_cookie_secure else "Lax"
+    flask_session_name = os.getenv("FLASK_SESSION_COOKIE_NAME", "flask_session")
+    flask_session_secure_env = os.getenv("FLASK_SESSION_COOKIE_SECURE")
+    if flask_session_secure_env is not None:
+        flask_session_secure = flask_session_secure_env.strip().lower() == "true"
+    else:
+        flask_session_secure = True
+    if not flask_session_secure and not is_development:
+        logger.warning(
+            "FLASK_SESSION_COOKIE_SECURE is disabled outside development; browsers may drop session cookies."
+        )
+
     firebase_project_id = os.getenv("FIREBASE_PROJECT_ID")
     admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
     admin_emails = [
@@ -132,10 +139,10 @@ def create_app():
         SECRET_KEY=secret_key,
         WTF_CSRF_ENABLED=True,
         WTF_CSRF_SECRET_KEY=os.getenv("CSRF_SECRET_KEY", "a-different-secret-key"),
-        SESSION_COOKIE_NAME=session_cookie_name,
-        SESSION_COOKIE_SECURE=session_cookie_secure,
+        SESSION_COOKIE_NAME="flask_session",
+        SESSION_COOKIE_SECURE=True,
         SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE=session_cookie_samesite,
+        SESSION_COOKIE_SAMESITE="Lax",
         AUTH_ENABLED=auth_enabled,
         FIREBASE_PROJECT_ID=firebase_project_id,
         FIREBASE_WEB_API_KEY=os.getenv("FIREBASE_WEB_API_KEY"),
@@ -149,8 +156,33 @@ def create_app():
     if auth_enabled and not firebase_project_id:
         raise RuntimeError("FIREBASE_PROJECT_ID must be set when AUTH_ENABLED is true")
 
+    firebase_app = None
     if firebase_project_id and not firebase_admin._apps:
         firebase_admin.initialize_app()
+
+    if firebase_admin._apps:
+        firebase_app = firebase_admin.get_app()
+        logger.info(
+            "Firebase Admin project_id: %s",
+            getattr(firebase_app, "project_id", None),
+        )
+    logger.info(
+        "Firebase client project_id (login page): %s",
+        firebase_project_id,
+    )
+    if (
+        firebase_app
+        and getattr(firebase_app, "project_id", None)
+        and firebase_project_id
+        and firebase_app.project_id != firebase_project_id
+    ):
+        logger.error(
+            "Firebase Admin project_id does not match client configuration",
+            extra={
+                "firebase_admin_project_id": firebase_app.project_id,
+                "firebase_client_project_id": firebase_project_id,
+            },
+        )
 
     from app.extensions import csrf
 
@@ -204,6 +236,20 @@ def create_app():
         app.register_blueprint(auth.auth_bp)
         print("Registered auth blueprint")
 
+    from app.auth import get_current_user_from_cookie, build_user_context
+
+    @app.before_request
+    def attach_authenticated_user():
+        """Attach the authenticated user to the request context."""
+        g.user = None
+        if request.path.startswith(('/static/', '/auth/')):
+            return
+
+        if not app.config.get("AUTH_ENABLED", False):
+            return
+
+        g.user = get_current_user_from_cookie()
+
     if canonical_host:
 
         @app.before_request
@@ -226,11 +272,12 @@ def create_app():
             redirect_url = f"https://{canonical_host}{target_path}"
             return redirect(redirect_url, code=301)
 
-    @app.before_request
-    def block_wordpress_bots():
-        """Block common WordPress bot paths."""
-        if request.path.startswith(("/wp-admin", "/xmlrpc.php", "/wp-login.php")):
-            abort(403)
+    @app.route("/wp-admin/<path:_>")
+    @app.route("/wordpress/<path:_>")
+    @app.route("/xmlrpc.php")
+    def _wp_block(_=None):
+        """Return a 410 Gone for obvious WordPress probes."""
+        return ("", 410)
 
     # Conditionally register the task handler blueprint
     # This is to avoid running the task handler in a local dev environment

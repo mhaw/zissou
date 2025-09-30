@@ -1,7 +1,10 @@
-from app.main import create_app
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from flask import g
+
+from app.main import create_app
 
 
 @patch("google.cloud.firestore.Client")
@@ -61,3 +64,50 @@ def test_admin_route_allows_admin(mock_ensure_user, client):
     mock_ensure_user.side_effect = ensure_user_side_effect
     response = client.get("/admin/")
     assert response.status_code == 200
+
+
+@patch("app.routes.auth.users_service.get_or_create_user")
+@patch("app.routes.auth.firebase_auth.create_session_cookie")
+@patch("app.routes.auth.firebase_auth.verify_id_token")
+def test_session_login_sets_cookie_attributes(
+    mock_verify_id_token,
+    mock_create_session_cookie,
+    mock_get_or_create_user,
+    client,
+):
+    client.application.config.update(
+        {
+            "SESSION_COOKIE_SECURE": True,
+            "SESSION_COOKIE_SAMESITE": "None",
+        }
+    )
+
+    decoded_token = {"uid": "user123", "email": "user@example.com", "name": "User"}
+    mock_verify_id_token.return_value = decoded_token
+    mock_create_session_cookie.return_value = "session-token"
+
+    fake_user = SimpleNamespace(id="user123", email="user@example.com", role="member")
+    fake_user.to_dict = lambda: {
+        "id": fake_user.id,
+        "email": fake_user.email,
+        "role": fake_user.role,
+    }
+    mock_get_or_create_user.return_value = (fake_user, False)
+
+    response = client.post(
+        "/auth/sessionLogin",
+        json={"idToken": "token-value", "rememberMe": False},
+    )
+
+    assert response.status_code == 200
+
+    cookie_headers = response.headers.getlist("Set-Cookie")
+    session_cookie_header = next(
+        header for header in cookie_headers if "__zissou_session" in header
+    )
+
+    assert "Path=/" in session_cookie_header
+    assert "Secure" in session_cookie_header
+    assert "HttpOnly" in session_cookie_header
+    assert "SameSite=None" in session_cookie_header
+    assert "Domain=" not in session_cookie_header

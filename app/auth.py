@@ -12,6 +12,8 @@ from firebase_admin import auth as firebase_auth  # type: ignore[import-untyped]
 TCallable = TypeVar("TCallable", bound=Callable[..., Any])
 logger = logging.getLogger(__name__)
 
+from app.constants import FB_COOKIE
+
 PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     "/static/",
     "/auth/",
@@ -55,76 +57,16 @@ def build_user_context(
     }
 
 
-def _verify_session_cookie() -> Optional[dict[str, Any]]:
+def get_current_user_from_cookie() -> Optional[dict[str, Any]]:
     """Decode the Firebase session cookie if present and return user context."""
-    if not current_app.config.get("AUTH_ENABLED", False):
-        return None
-
-    path = request.path or ""
-    endpoint = request.endpoint or ""
-    method = (request.method or "").upper()
-
-    is_public_endpoint = (
-        method in {"OPTIONS", "HEAD"}
-        or endpoint in PUBLIC_ENDPOINTS
-        or any(endpoint.startswith(prefix) for prefix in PUBLIC_ENDPOINT_PREFIXES)
-        or any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES)
-    )
-
-    if is_public_endpoint:
-        return None
-
-    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
-
-    session_cookie_name = current_app.config.get(
-        "SESSION_COOKIE_NAME", "__zissou_session"
-    )
-    cookie = request.cookies.get(session_cookie_name)
+    cookie = request.cookies.get(FB_COOKIE)
     if not cookie:
         return None
-
     try:
-        claims = firebase_auth.verify_session_cookie(cookie, check_revoked=True)
-        return claims
-    except ValueError as exc:
-        logger.error(
-            "Unable to verify session cookie due to configuration error: %s",
-            exc,
-            extra={
-                "auth_event": "session_verify_failure",
-                "reason": str(exc),
-                "exception": exc.__class__.__name__,
-                "path": path,
-                "endpoint": endpoint,
-                "ip": ip_address,
-            },
-        )
-        return None
-    except firebase_auth.InvalidSessionCookieError as exc:
-        logger.info(
-            "Invalid session cookie presented",
-            extra={
-                "auth_event": "session_verify_failure",
-                "reason": str(exc),
-                "exception": exc.__class__.__name__,
-                "path": path,
-                "endpoint": endpoint,
-                "ip": ip_address,
-            },
-        )
-        return None
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.info(
-            "Session cookie verification failed",
-            extra={
-                "auth_event": "session_verify_failure",
-                "reason": str(exc),
-                "exception": exc.__class__.__name__,
-                "path": path,
-                "endpoint": endpoint,
-                "ip": ip_address,
-            },
-        )
+        decoded = firebase_auth.verify_session_cookie(cookie, check_revoked=True)
+        return build_user_context(decoded)
+    except Exception as e:
+        current_app.logger.info(f"verify_session_cookie failed: {e.__class__.__name__}: {e}")
         return None
 
 
