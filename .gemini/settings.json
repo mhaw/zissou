@@ -10,6 +10,16 @@
         "GOOGLE_CLOUD_PROJECT": "zissou-471603",
         "GOOGLE_CLOUD_REGION": "us-central1"
       }
+    },
+    "preflight": {
+      "command": "",
+      "args": [
+        "docker",
+        "run,--rm,-v,/home/mhaw/projects/zissou:/app,-w,/app,python:3.12,python,-m,gunicorn,-b,0.0.0.0:8080,app.main:app"
+      ],
+      "env": {
+        "PORT": "8080"
+      }
     }
   }
 }

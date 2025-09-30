@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import os
 from flask import g
 
@@ -37,6 +38,7 @@ class ContextualFilter(logging.Filter):
         record.trace_id = None
         record.trace = None
         record.task_id = None
+        record.service_name = os.getenv("SERVICE_NAME", "zissou-app")
 
         if trace:
             try:
@@ -65,7 +67,8 @@ class ContextualFilter(logging.Filter):
 
 def setup_logging():
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logger.setLevel(log_level)
 
     if logger.handlers:
         for handler in list(logger.handlers):
@@ -74,14 +77,29 @@ def setup_logging():
     console_handler = logging.StreamHandler()
     console_handler.addFilter(ContextualFilter())
 
+    # Simplify the formatter to let the library handle field discovery.
+    # This ensures fields like `exc_info` are cleanly added for exceptions.
     formatter = jsonlogger.JsonFormatter(
-        "%(asctime)s %(levelname)s %(message)s %(filename)s %(lineno)d "
-        "(trace_id=%(trace_id)s) (task_id=%(task_id)s)",
+        "%(message)s",
         rename_fields={"levelname": "severity", "asctime": "timestamp"},
     )
 
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
+
+    # Add a file handler for local development for easier debugging.
+    if os.getenv("ENV") == "development":
+        log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "instance")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "development.log")
+
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=1024 * 1024 * 5, backupCount=5  # 5 MB per file
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.addFilter(ContextualFilter())
+        logger.addHandler(file_handler)
+        logging.info(f"Development log file enabled at: {log_file}")
 
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
     logging.getLogger("google").setLevel(logging.WARNING)

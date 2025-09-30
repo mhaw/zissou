@@ -224,6 +224,14 @@ DEPLOY_CMD+=("--quiet")
 
 "${DEPLOY_CMD[@]}"
 
+section "Configuring health checks"
+gcloud run services update "$SERVICE_NAME" \
+    --project="$GCP_PROJECT_ID" \
+    --region="$GCP_REGION" \
+    --liveness-probe-request-path=/health \
+    --liveness-probe-initial-delay-seconds=30 \
+    --quiet
+
 section "Post-deploy steps"
 NEW_SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" \
     --platform=managed \

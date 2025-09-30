@@ -1,14 +1,18 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, g
 
+import app.auth as auth
 from app.auth import require_roles
 from app.services import (
+    audit,
     buckets as buckets_service,
+    health as health_service,
     items as items_service,
     storage,
     tasks as tasks_service,
+    users as users_service,
 )
 from app.services.items import FirestoreError
 from app.services.storage import StorageError
@@ -19,6 +23,7 @@ from app.services.tasks import (
     RETRYABLE_STATUSES,
     STALE_THRESHOLDS,
     STATUS_FILTER_OPTIONS,
+    STATUS_LABELS,
 )
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -35,7 +40,14 @@ def _parse_list_params():
     after = request.args.get("after")
     limit = int(request.args.get("limit", 50))
     status = (request.args.get("status") or "").strip()
-    return {"sort": sort, "after": after, "limit": limit, "status": status}
+    search_query = (request.args.get("q") or "").strip()
+    return {
+        "sort": sort,
+        "after": after,
+        "limit": limit,
+        "status": status,
+        "q": search_query,
+    }
 
 
 def _normalize_datetime(value):
@@ -76,26 +88,46 @@ def _build_task_health(tasks):
 @bp.route("/")
 def index():
     params = _parse_list_params()
-    status_filter = params["status"] or None
+    status_filter: str | None = None
+    if params["status"]:
+        candidate = params["status"].upper()
+        if candidate in STATUS_LABELS:
+            status_filter = candidate
+        else:
+            logger.warning("Unknown task status filter requested: %s", params["status"])
 
+    # System Health
+    firestore_ok, firestore_status = health_service.check_firestore_health()
+    gcs_ok, gcs_status = health_service.check_gcs_health()
+    system_health = {
+        "firestore": {"ok": firestore_ok, "status": firestore_status},
+        "gcs": {"ok": gcs_ok, "status": gcs_status},
+    }
+
+    # User Stats
+    total_users = users_service.get_user_count()
+    recent_users = users_service.get_recent_user_count()
+
+    # Content Stats
+    total_items = items_service.get_item_count()
+    total_buckets = buckets_service.get_bucket_count()
+
+    # Task Stats
     tasks, next_cursor = tasks_service.list_tasks(
         sort=params["sort"],
         after=params["after"],
         limit=params["limit"],
         status=status_filter,
+        search_query=params["q"],
     )
-
     status_counts = tasks_service.get_status_counts()
     recent_activity = tasks_service.get_recent_activity(hours=24)
-
     task_health, stale_by_status = _build_task_health(tasks)
     stale_total = sum(stale_by_status.values())
-
     queued_total = status_counts.get("QUEUED", 0)
     in_progress_total = sum(status_counts.get(name, 0) for name in IN_PROGRESS_STATUSES)
     failed_total = status_counts.get("FAILED", 0)
     completed_total = status_counts.get("COMPLETED", 0)
-
     recent_counts = recent_activity.get("counts", {})
     recent_completed = recent_counts.get("COMPLETED", 0)
     recent_failed = recent_counts.get("FAILED", 0)
@@ -103,6 +135,15 @@ def index():
 
     return render_template(
         "admin/index.html",
+        # System Health
+        system_health=system_health,
+        # User Stats
+        total_users=total_users,
+        recent_users=recent_users,
+        # Content Stats
+        total_items=total_items,
+        total_buckets=total_buckets,
+        # Task Stats
         tasks=tasks,
         params=params,
         next_cursor=next_cursor,
@@ -136,11 +177,23 @@ def bulk_import():
             flash("No URLs provided for bulk import.", "error")
             return redirect(url_for("admin.bulk_import"))
 
+        user_context = g.get("user") or auth.ensure_user() or {}
+        if not user_context or "uid" not in user_context:
+            flash(
+                "Unable to queue articles without an authenticated admin user.", "error"
+            )
+            return redirect(url_for("admin.bulk_import"))
+
         queued_count = 0
         failed_count = 0
         for url in urls:
             try:
-                tasks_service.create_task(url, voice=voice, bucket_id=bucket_id)
+                tasks_service.create_task(
+                    url,
+                    voice=voice,
+                    bucket_id=bucket_id,
+                    user=user_context,
+                )
                 queued_count += 1
             except Exception:
                 logger.exception("Error queuing URL via bulk import: %s", url)
@@ -152,6 +205,11 @@ def bulk_import():
             flash(
                 f"Failed to queue {failed_count} URLs. See logs for details.", "error"
             )
+
+        audit.log_admin_action(
+            "bulk_import",
+            details={"queued": queued_count, "failed": failed_count, "urls": urls},
+        )
 
         return redirect(url_for("admin.bulk_import"))
 
@@ -169,6 +227,7 @@ def retry_processing(task_id):
 
     try:
         tasks_service.retry_task(task)
+        audit.log_admin_action("retry_task", target_id=task_id)
         flash(f"Re-queued task {task.id} for URL: {task.sourceUrl}", "info")
     except Exception as exc:
         logger.exception("Error retrying task %s", task_id)
@@ -194,6 +253,7 @@ def delete_item(item_id: str):
 
     try:
         items_service.delete_item(item_id)
+        audit.log_admin_action("delete_item", target_id=item_id)
     except FirestoreError as exc:
         logger.exception("Failed to delete item %s: %s", item_id, exc)
         flash("Unable to delete the article. Please try again later.", "error")

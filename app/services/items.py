@@ -4,7 +4,7 @@ from google.cloud import firestore  # type: ignore[attr-defined]
 from google.cloud.firestore_v1 import FieldFilter  # Import FieldFilter
 from google.cloud.exceptions import GoogleCloudError
 from app.models.item import Item
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from cachetools import cached, TTLCache
 from typing import Optional, List, Tuple
@@ -72,9 +72,7 @@ def get_item(item_id: str) -> Item | None:
     """Retrieves a single item by its ID."""
     _require_db()
     try:
-        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(
-            item_id
-        )
+        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(item_id)
         doc = item_ref.get()
         if not doc.exists:
             return None
@@ -324,9 +322,7 @@ def update_item_buckets(item_id: str, bucket_ids: list[str]):
     """Updates the list of buckets for a given item."""
     _require_db()
     try:
-        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(
-            item_id
-        )
+        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(item_id)
 
         item_ref.update(
             {"buckets": bucket_ids, "updatedAt": datetime.now(timezone.utc)}
@@ -354,9 +350,7 @@ def update_item_tags(item_id: str, tags: list[str]):
     """Updates the list of tags for a given item."""
     _require_db()
     try:
-        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(
-            item_id
-        )
+        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(item_id)
 
         item_ref.update({"tags": tags, "updatedAt": datetime.now(timezone.utc)})
         clear_cached_functions(
@@ -382,9 +376,7 @@ def update_item_archived_status(item_id: str, is_archived: bool):
     """Updates the archived status of a given item."""
     _require_db()
     try:
-        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(
-            item_id
-        )
+        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(item_id)
 
         item_ref.update(
             {"is_archived": is_archived, "updatedAt": datetime.now(timezone.utc)}
@@ -441,9 +433,7 @@ def delete_item(item_id: str) -> bool:
     """Delete an item document from Firestore."""
     _require_db()
     try:
-        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(
-            item_id
-        )
+        item_ref = db.collection(FIRESTORE_COLLECTION_ITEMS).document(item_id)
         doc = item_ref.get()
         if not doc.exists:
             return False

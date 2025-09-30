@@ -1,30 +1,17 @@
-try:
-    from flask_caching import Cache  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - fallback for offline dev/test
-    from functools import wraps
-    import logging
+from __future__ import annotations
 
-    logger = logging.getLogger(__name__)
+import logging
 
-    class Cache:  # minimal fallback shim  # type: ignore[no-redef]
-        def __init__(self):
-            logger.warning("Flask-Caching not installed; using no-op cache shim.")
+from flask_caching import Cache
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-        def init_app(self, app):  # pylint: disable=unused-argument
-            return None
-
-        def cached(self, *args, **kwargs):  # pylint: disable=unused-argument
-            def decorator(func):
-                @wraps(func)
-                def wrapper(*w_args, **w_kwargs):
-                    return func(*w_args, **w_kwargs)
-
-                return wrapper
-
-            return decorator
-
-        def delete_memoized(self, *args, **kwargs):  # pylint: disable=unused-argument
-            return None
-
+logger = logging.getLogger(__name__)
 
 cache = Cache()
+csrf = CSRFProtect()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+)

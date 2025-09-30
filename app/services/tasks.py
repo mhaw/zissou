@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 from google.cloud import firestore  # type: ignore[attr-defined]
@@ -105,7 +105,7 @@ def create_cloud_task(task_payload: dict):
         raise ValueError("Cloud Tasks environment is not configured.")
 
     client = CloudTasksClient()
-    parent = client.queue_path(project, location, queue) # type: ignore[arg-type]
+    parent = client.queue_path(project, location, queue)  # type: ignore[arg-type]
 
     task = {
         "http_request": {
@@ -128,7 +128,12 @@ def create_cloud_task(task_payload: dict):
         raise
 
 
-def create_task(url: str, voice: Optional[str] = None, bucket_id: Optional[str] = None, user: Any = None) -> str:
+def create_task(
+    url: str,
+    voice: Optional[str] = None,
+    bucket_id: Optional[str] = None,
+    user: Any = None,
+) -> str:
     """
     Creates a task document in Firestore and, if in a deployed environment,
     enqueues a corresponding task in Google Cloud Tasks.
@@ -136,24 +141,41 @@ def create_task(url: str, voice: Optional[str] = None, bucket_id: Optional[str] 
     """
     _ensure_db_client()
     try:
-        if user and user.default_voice:
-            voice = user.default_voice
-        if user and user.default_bucket_id and not bucket_id:
-            bucket_id = user.default_bucket_id
+        if user:
+            default_voice = (
+                user.get("default_voice")
+                if isinstance(user, dict)
+                else getattr(user, "default_voice", None)
+            )
+            if default_voice:
+                voice = default_voice
+
+            default_bucket = (
+                user.get("default_bucket_id")
+                if isinstance(user, dict)
+                else getattr(user, "default_bucket_id", None)
+            )
+            if default_bucket and not bucket_id:
+                bucket_id = default_bucket
 
         task = Task(sourceUrl=url, voice=voice, bucket_id=bucket_id)
         if user:
-            task.userId = user["uid"]
+            task.userId = (
+                user.get("uid")
+                if isinstance(user, dict)
+                else getattr(user, "uid", None)
+            )
         task_ref = db.collection(TASKS_COLLECTION).document()
         task.id = task_ref.id
 
         # Local development: process synchronously
         if os.getenv("ENV") == "development":
             from app.routes.tasks import process_article_task
+
             logger.info(f"Processing task {task.id} synchronously in local dev.")
             task.status = "PROCESSING"
             task_ref.set(task.to_dict())
-            process_article_task(task.id, url, voice, bucket_id)
+            process_article_task(task.id, url, voice, bucket_id, task.userId)
             return task.id
 
         # Deployed environment: enqueue to Cloud Tasks
@@ -184,6 +206,17 @@ def create_task(url: str, voice: Optional[str] = None, bucket_id: Optional[str] 
         raise
 
 
+def submit_task(
+    url: str,
+    voice: Optional[str] = None,
+    bucket_id: Optional[str] = None,
+    user: Any = None,
+) -> str:
+    """Backward-compatible alias for ``create_task``."""
+
+    return create_task(url, voice=voice, bucket_id=bucket_id, user=user)
+
+
 def retry_task(task: Task) -> str:
     _ensure_db_client()
     if not task.id:
@@ -191,10 +224,11 @@ def retry_task(task: Task) -> str:
 
     task_ref = db.collection(TASKS_COLLECTION).document(task.id)
     retry_count = (task.retryCount or 0) + 1
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if os.getenv("ENV") == "development":
         from app.routes.tasks import process_article_task
+
         update_fields = {
             "status": "PROCESSING",
             "updatedAt": now,
@@ -204,7 +238,13 @@ def retry_task(task: Task) -> str:
             "retryCount": retry_count,
         }
         task_ref.update(update_fields)
-        process_article_task(task.id, task.sourceUrl, task.voice, task.bucket_id)
+        process_article_task(
+            task.id,
+            task.sourceUrl,
+            task.voice,
+            task.bucket_id,
+            task.userId,
+        )
         return task.id
 
     update_fields = {
@@ -239,6 +279,7 @@ def get_task(task_id: str) -> Task | None:
     except GoogleCloudError as e:
         logger.error(f"Firestore error getting task {task_id}: {e}")
         raise FirestoreError(f"Failed to get task {task_id}.") from e
+
 
 def get_task_by_source_url(source_url: str) -> Task | None:
     """Retrieves the most recent task for a given source URL."""
@@ -279,10 +320,10 @@ def claim_task_for_processing(task_id: str) -> tuple[str, Task | None]:
             return "duplicate", task_obj
         transaction.update(
             ref,
-            {"status": "PROCESSING", "updatedAt": datetime.utcnow()},
+            {"status": "PROCESSING", "updatedAt": datetime.now(timezone.utc)},
         )
         task_obj.status = "PROCESSING"
-        task_obj.updatedAt = datetime.utcnow()
+        task_obj.updatedAt = datetime.now(timezone.utc)
         return "claimed", task_obj
 
     try:
@@ -304,7 +345,7 @@ def update_task(
     _ensure_db_client()
     try:
         task_ref = db.collection(TASKS_COLLECTION).document(task_id)
-        update_data = {"status": status, "updatedAt": datetime.utcnow()}
+        update_data = {"status": status, "updatedAt": datetime.now(timezone.utc)}
         if item_id:
             update_data["item_id"] = item_id
         if error:
@@ -328,6 +369,7 @@ def list_tasks(
     after: Optional[str] = None,
     limit: int = 50,
     status: str | None = None,
+    search_query: str | None = None,
 ) -> tuple[list[Task], str | None]:
     """Return tasks sorted by the requested field along with a pagination cursor."""
     _ensure_db_client()
@@ -336,6 +378,8 @@ def list_tasks(
         query = tasks_ref
         if status:
             query = query.where("status", "==", status)
+        if search_query:
+            query = query.where("sourceUrl", "==", search_query)
 
         sort_direction = (
             firestore.Query.DESCENDING
@@ -396,7 +440,7 @@ def get_recent_activity(
 ) -> dict[str, object]:
     """Return counts of task outcomes updated within ``hours`` (defaults to ``RECENT_ACTIVITY_DEFAULTS``)."""
     _ensure_db_client()
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     tasks_ref = db.collection(TASKS_COLLECTION)
     status_list = statuses or RECENT_ACTIVITY_DEFAULTS
     counts: dict[str, int] = {}
@@ -417,7 +461,7 @@ def detach_item_from_tasks(item_id: str) -> int:
         updated = 0
         for doc in docs:
             tasks_ref.document(doc.id).update(
-                {"item_id": None, "updatedAt": datetime.utcnow()}
+                {"item_id": None, "updatedAt": datetime.now(timezone.utc)}
             )
             updated += 1
         if updated:

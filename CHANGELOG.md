@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Environment validation**: Application startup now fails fast with a clear error when required Cloud Tasks or Firebase env vars are missing.
 - **User-Specific Voices**: Users can now set a default voice for their articles in their profile.
 - **Smart Buckets**: Create rule-based buckets to automatically categorize articles based on domain, title, or other metadata.
 - **Article Archiving**: Archive articles to hide them from the main list without deleting them.
@@ -42,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the standalone `worker.py` script, as its functionality is now handled by Google Cloud Tasks and a new task handler route within the main application.
 
 ### Fixed
+- **App bootstrap**: Prevented duplicate auth blueprint registration and ensured the rate-limiter uses the shared extension so `create_app` no longer raises on missing imports.
+- **Session cookies**: Guarded auth request hooks against unset `g.user` values and missing Firebase project IDs, eliminating crashes in local/test environments.
+- **Cloud Tasks admin tooling**: Bulk import now reuses the authenticated admin context, honors patched helpers in tests, and continues to audit queued URLs.
+- **Task lifecycle**: Normalised task timestamps to UTC, carried the user ID through retries, and restored the legacy `submit_task` helper for existing callers.
 - **Article Extraction**: Updated Trafilatura integration to handle v1.6+ metadata API changes so feeds and tasks no longer spam warnings or fall back unnecessarily.
 - **Logging & Tracing**: Resolved the OpenTelemetry `trace` NameError and made task context enrichment resilient when tracing is disabled.
 - **Cloud Tasks Auth**: Adjusted token audience verification so Google Cloud Tasks callbacks authenticate against both the service base URL and `/tasks/process` endpoint, eliminating 500s during webhook delivery.

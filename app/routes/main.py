@@ -3,6 +3,7 @@ import random
 from urllib.parse import urlencode, urlparse
 from flask import (
     Blueprint,
+    abort,
     flash,
     g,
     redirect,
@@ -13,6 +14,7 @@ from flask import (
 )
 from app.auth import auth_required
 from app.extensions import cache
+from app.models.smart_bucket import SmartBucketRule
 from app.services import (
     items as items_service,
     buckets as buckets_service,
@@ -43,8 +45,6 @@ def _parse_list_params():
     duration = request.args.get("duration")
     after = request.args.get("after")
     limit = int(request.args.get("limit", 25))
-    include_archived = request.args.get("include_archived", "false").lower() == "true"
-    include_read = request.args.get("include_read", "false").lower() == "true"
 
     raw_tags = request.args.getlist("tags")
     if not raw_tags:
@@ -204,6 +204,7 @@ def _is_valid_source_url(candidate: str) -> bool:
 
 
 @bp.route("/", methods=["GET"])
+@auth_required
 @cache.cached(query_string=True, unless=_should_skip_cache)
 def index():
     """Lists all items."""
@@ -241,6 +242,7 @@ def index():
 
 
 @bp.route("/new", methods=("GET", "POST"))
+@auth_required
 def new_item():
     """Handles submission of a new article."""
     all_buckets = buckets_service.list_buckets()
@@ -274,7 +276,9 @@ def new_item():
             return redirect(url_for("main.new_item", url=url))
 
         try:
-            task_id = tasks_service.create_task(url, voice=voice, bucket_id=bucket_id, user=g.user)
+            task_id = tasks_service.submit_task(
+                url, voice=voice, bucket_id=bucket_id, user=g.user
+            )
             return redirect(url_for("main.progress_page", task_id=task_id))
         except (FirestoreError, ValueError) as e:
             logger.error(f"Failed to create processing task for url {url}: {e}")
@@ -300,6 +304,7 @@ def new_item():
 
 
 @bp.route("/import/readwise", methods=("GET", "POST"))
+@auth_required
 def import_readwise():
     all_buckets = buckets_service.list_buckets()
     shared_url = ""
@@ -367,7 +372,7 @@ def import_readwise():
                 failures.append(article_url)
                 continue
             try:
-                tasks_service.create_task(
+                tasks_service.submit_task(
                     article_url,
                     voice=default_voice or None,
                     bucket_id=default_bucket or None,
@@ -459,6 +464,7 @@ def get_task_status(task_id):
 
 
 @bp.route("/api/items/<item_id>/tags", methods=["POST"])
+@auth_required
 def update_item_tags_api(item_id):
     payload = request.get_json(silent=True) or {}
     raw_tags = payload.get("tags", [])
@@ -542,6 +548,7 @@ def update_item_tags_api(item_id):
 
 
 @bp.route("/api/items/<item_id>/buckets", methods=["POST"])
+@auth_required
 def update_item_buckets_api(item_id):
     payload = request.get_json(silent=True) or {}
     raw_bucket_ids = payload.get("bucket_ids", [])
@@ -607,13 +614,12 @@ def update_item_buckets_api(item_id):
 
 
 @bp.route("/items/<item_id>", methods=("GET", "POST"))
+@auth_required
 def item_detail(item_id):
     item = items_service.get_item(item_id)
     if not item:
         flash("Item not found.")
         return redirect(url_for("main.index"))
-
-    task = tasks_service.get_task_by_source_url(item.sourceUrl)
 
     if request.method == "POST":
         if "tags" in request.form:
@@ -661,6 +667,7 @@ def item_detail(item_id):
 
 
 @bp.route("/items/<item_id>/read", methods=["POST"])
+@auth_required
 def read_item(item_id):
     """Marks an item as read or unread."""
     item = items_service.get_item(item_id)
@@ -671,7 +678,10 @@ def read_item(item_id):
     try:
         items_service.toggle_read_status(item_id, g.user["uid"])
         _invalidate_page_cache()
-        flash(f"Item marked as {'read' if item.is_read else 'unread'} successfully.", "info")
+        flash(
+            f"Item marked as {'read' if item.is_read else 'unread'} successfully.",
+            "info",
+        )
     except FirestoreError as e:
         logger.error(f"Failed to update read status for item {item_id}: {e}")
         flash("Error updating item. Please try again later.", "error")
@@ -682,6 +692,7 @@ def read_item(item_id):
 
 
 @bp.route("/items/<item_id>/archive", methods=["POST"])
+@auth_required
 def archive_item(item_id):
     """Archives or unarchives an item."""
     item = items_service.get_item(item_id)
@@ -693,7 +704,9 @@ def archive_item(item_id):
     try:
         items_service.update_item_archived_status(item_id, is_archived)
         _invalidate_page_cache()
-        flash(f"Item {'archived' if is_archived else 'unarchived'} successfully.", "info")
+        flash(
+            f"Item {'archived' if is_archived else 'unarchived'} successfully.", "info"
+        )
     except FirestoreError as e:
         logger.error(f"Failed to update archived status for item {item_id}: {e}")
         flash("Error updating item. Please try again later.", "error")
@@ -877,8 +890,30 @@ def profile():
     if request.method == "POST":
         default_voice = request.form.get("default_voice")
         default_bucket_id = request.form.get("default_bucket_id")
-        users_service.update_user(user.id, {"default_voice": default_voice, "default_bucket_id": default_bucket_id})
+        users_service.update_user(
+            user.id,
+            {"default_voice": default_voice, "default_bucket_id": default_bucket_id},
+        )
         flash("Your profile has been updated.", "success")
         return redirect(url_for("main.profile"))
 
-    return render_template("profile.html", user=user, voice_profiles=VOICE_PROFILES, buckets=all_buckets)
+    return render_template(
+        "profile.html", user=user, voice_profiles=VOICE_PROFILES, buckets=all_buckets
+    )
+
+
+@bp.route("/profile/delete", methods=["POST"])
+@auth_required
+def delete_account():
+    """Permanently deletes the current user's account."""
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        abort(403)
+
+    try:
+        user_id = g.user["uid"]
+        users_service.delete_user(user_id)
+        # The logout route will clear the session cookie
+        return jsonify({"status": "ok"}), 200
+    except users_service.FirestoreError as e:
+        logger.error(f"Failed to delete account for user {g.user['uid']}: {e}")
+        return jsonify({"error": "Failed to delete account."}), 500

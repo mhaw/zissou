@@ -1,15 +1,31 @@
 """Authentication helpers for Firebase-backed session cookies."""
+
 from __future__ import annotations
 
 import logging
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
 
-from flask import abort, current_app, flash, g, redirect, request, session, url_for
+from flask import abort, current_app, g, redirect, request, url_for
 from firebase_admin import auth as firebase_auth  # type: ignore[import-untyped]
 
 TCallable = TypeVar("TCallable", bound=Callable[..., Any])
 logger = logging.getLogger(__name__)
+
+PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
+    "/static/",
+    "/auth/",
+    "/favicon.ico",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/manifest.json",
+    "/.well-known/",
+    "/healthz",
+    "/status",
+    "/ping",
+)
+PUBLIC_ENDPOINT_PREFIXES: tuple[str, ...] = ("auth.",)
+PUBLIC_ENDPOINTS: set[str] = {"static"}
 
 
 def _admin_email_set() -> set[str]:
@@ -21,64 +37,100 @@ def _admin_email_set() -> set[str]:
     return {candidate for candidate in candidates if candidate}
 
 
-def build_user_context(claims: dict[str, Any]) -> dict[str, Any]:
-    """Map Firebase claims into the session payload we persist locally."""
-    email = (claims.get("email") or "").lower()
-    admins = _admin_email_set()
-    is_admin = not admins or (email and email in admins)
-    role = "admin" if is_admin else "member"
+def build_user_context(
+    claims: dict[str, Any], db_user: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
+    """Map Firebase claims and a database user record into the session payload."""
+    db_user = db_user or {}
+    # Check for Multi-Factor Authentication
+    auth_methods = claims.get("amr", [])
+    is_mfa = "mfa" in auth_methods
+
     return {
         "uid": claims.get("uid"),
         "email": claims.get("email"),
         "name": claims.get("name"),
-        "role": role,
+        "role": db_user.get("role", "member"),
+        "is_mfa": is_mfa,
     }
-
-
-def _sync_session_user(user: Optional[dict[str, Any]]) -> None:
-    if not user:
-        if session.pop("user", None) is not None:
-            session.modified = True
-        return
-
-    payload = {
-        key: user.get(key) for key in ("uid", "email", "name", "role", "default_voice") if user.get(key)
-    }
-    if session.get("user") != payload:
-        session["user"] = payload
 
 
 def _verify_session_cookie() -> Optional[dict[str, Any]]:
     """Decode the Firebase session cookie if present and return user context."""
+    if not current_app.config.get("AUTH_ENABLED", False):
+        return None
+
+    path = request.path or ""
+    endpoint = request.endpoint or ""
+    method = (request.method or "").upper()
+
+    is_public_endpoint = (
+        method in {"OPTIONS", "HEAD"}
+        or endpoint in PUBLIC_ENDPOINTS
+        or any(endpoint.startswith(prefix) for prefix in PUBLIC_ENDPOINT_PREFIXES)
+        or any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES)
+    )
+
+    if is_public_endpoint:
+        return None
+
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
+
     session_cookie_name = current_app.config.get(
         "SESSION_COOKIE_NAME", "__zissou_session"
     )
     cookie = request.cookies.get(session_cookie_name)
     if not cookie:
-        _sync_session_user(None)
         return None
 
     try:
         claims = firebase_auth.verify_session_cookie(cookie, check_revoked=True)
-    except Exception:  # pylint: disable=broad-except
-        logger.debug("Session cookie verification failed", exc_info=True)
-        _sync_session_user(None)
+        return claims
+    except ValueError as exc:
+        logger.error(
+            "Unable to verify session cookie due to configuration error: %s",
+            exc,
+            extra={
+                "auth_event": "session_verify_failure",
+                "reason": str(exc),
+                "exception": exc.__class__.__name__,
+                "path": path,
+                "endpoint": endpoint,
+                "ip": ip_address,
+            },
+        )
         return None
-
-    user_context = build_user_context(claims)
-    _sync_session_user(user_context)
-    return user_context
+    except firebase_auth.InvalidSessionCookieError as exc:
+        logger.info(
+            "Invalid session cookie presented",
+            extra={
+                "auth_event": "session_verify_failure",
+                "reason": str(exc),
+                "exception": exc.__class__.__name__,
+                "path": path,
+                "endpoint": endpoint,
+                "ip": ip_address,
+            },
+        )
+        return None
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.info(
+            "Session cookie verification failed",
+            extra={
+                "auth_event": "session_verify_failure",
+                "reason": str(exc),
+                "exception": exc.__class__.__name__,
+                "path": path,
+                "endpoint": endpoint,
+                "ip": ip_address,
+            },
+        )
+        return None
 
 
 def ensure_user() -> Optional[dict[str, Any]]:
     """Ensure g.user is populated with the current authenticated user context."""
-    user = getattr(g, "user", None)
-    if user is not None:
-        return user
-
-    user = _verify_session_cookie()
-    g.user = user
-    return user
+    return g.get("user")
 
 
 def require_roles(*roles: str):
@@ -88,13 +140,32 @@ def require_roles(*roles: str):
 
     user = ensure_user()
     if not user:
-        login_url = url_for("auth.login", next=request.path)
+        logger.info(
+            "Unauthenticated access attempt blocked",
+            extra={
+                "auth_event": "auth_required_failure",
+                "path": request.path,
+                "ip": request.remote_addr,
+            },
+        )
+        login_url = url_for("auth.login", next=request.full_path)
         return redirect(login_url, code=302)
 
     if roles:
         allowed = {role.lower() for role in roles if role}
         current_role = (user.get("role") or "").lower()
         if allowed and current_role not in allowed:
+            logger.warning(
+                "User role authorization failure",
+                extra={
+                    "auth_event": "role_required_failure",
+                    "user_id": user.get("uid"),
+                    "user_role": current_role,
+                    "required_roles": list(allowed),
+                    "path": request.path,
+                    "ip": request.remote_addr,
+                },
+            )
             abort(403)
 
     return None

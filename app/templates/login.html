@@ -1,31 +1,103 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <title>Sign in</title>
+    <meta charset="utf-t">
+    <title>Sign in to Zissou</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
-      .container { max-width: 420px; margin: 0 auto; text-align: center; }
-      button { padding: 0.75rem 1.25rem; font-size: 1rem; border-radius: 6px; border: none; background: #1a73e8; color: #fff; cursor: pointer; }
-      button:disabled { background: #9bbcff; cursor: not-allowed; }
-      .error { color: #c62828; margin-top: 1rem; }
+      :root {
+        --brand-color: #4285F4;
+        --brand-color-hover: #357ae8;
+        --text-color: #333;
+        --text-color-light: #666;
+        --border-color: #ccc;
+        --error-color: #c62828;
+        --success-color: #2e7d32;
+        --bg-color: #f7f7f7;
+        --surface-color: #fff;
+      }
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg-color); display: grid; place-content: center; min-height: 100vh; padding: 1rem; box-sizing: border-box; }
+      .container { width: 100%; max-width: 420px; margin: 0 auto; text-align: center; background: var(--surface-color); padding: 2.5rem 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+      h1 { margin-top: 0; color: var(--text-color); }
+      p { color: var(--text-color-light); }
+      .form-group { margin-bottom: 1.25rem; text-align: left; }
+      label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-color); }
+      input[type="email"], input[type="password"], input[type="text"] { width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; box-sizing: border-box; transition: border-color 0.2s; }
+      input:focus { border-color: var(--brand-color); outline: none; box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2); }
+      .btn { width: 100%; padding: 0.75rem 1.25rem; font-size: 1rem; font-weight: 500; border-radius: 6px; border: 1px solid transparent; cursor: pointer; transition: background-color 0.2s, border-color 0.2s, color 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.75rem; }
+      .btn:disabled { background: #9bbcff; cursor: not-allowed; }
+      .btn-primary { background: var(--brand-color); color: #fff; }
+      .btn-primary:hover:not(:disabled) { background: var(--brand-color-hover); }
+      .btn-secondary { background: var(--surface-color); color: var(--text-color); border-color: var(--border-color); }
+      .btn-secondary:hover:not(:disabled) { background: #f2f2f2; }
+      .separator { font-size: 0.8rem; color: #999; margin: 1.5rem 0; text-transform: uppercase; display: flex; align-items: center; gap: 1rem; }
+      .separator::before, .separator::after { content: ''; height: 1px; background: #e0e0e0; flex-grow: 1; }
+      .feedback { margin-top: 1rem; font-weight: 500; }
+      .error { color: var(--error-color); }
+      .success { color: var(--success-color); }
+      .subtle-link { color: var(--brand-color); text-decoration: none; cursor: pointer; font-size: 0.9rem; }
+      .subtle-link:hover { text-decoration: underline; }
+      .hidden { display: none; }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>Sign in with Google</h1>
-      <p>We use Google to keep your Zissou account secure.</p>
-      <div style="margin: 1rem 0;">
-        <input type="checkbox" id="rememberMe" name="rememberMe" checked>
-        <label for="rememberMe">Remember me</label>
+      <div id="auth-container">
+        <h1>Sign in to Zissou</h1>
+        <p id="subtitle">Enter your details below to continue.</p>
+
+        <div id="feedback" class="feedback" role="alert"></div>
+
+        <form id="auth-form" class="mt-8">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          
+          <div id="google-signin-group" class="form-group">
+            <button id="googleSignIn" type="button" class="btn btn-primary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+              Continue with Google
+            </button>
+          </div>
+
+          <div class="separator">or</div>
+          
+          <div id="email-group" class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" name="email" required autocomplete="email">
+          </div>
+          
+          <div id="name-group" class="form-group hidden">
+            <label for="name">Full Name</label>
+            <input type="text" id="name" name="name" autocomplete="name">
+          </div>
+
+          <div id="password-group" class="form-group hidden">
+            <label for="password" class="flex justify-between">
+              <span>Password</span>
+              <a href="#" id="forgot-password-link" class="subtle-link">Forgot?</a>
+            </label>
+            <input type="password" id="password" name="password" autocomplete="current-password">
+          </div>
+
+          <div class="form-group">
+            <button id="continue-btn" type="submit" class="btn btn-secondary">Continue</button>
+          </div>
+        </form>
       </div>
-      <button id="googleSignIn" type="button">Continue with Google</button>
-      <p id="error" class="error" role="alert" hidden></p>
     </div>
+
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-      import { getAuth, GoogleAuthProvider, signInWithPopup, getIdToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+      import { 
+        getAuth, 
+        GoogleAuthProvider, 
+        signInWithPopup, 
+        signInWithEmailAndPassword, 
+        createUserWithEmailAndPassword, 
+        updateProfile, 
+        getIdToken,
+        fetchSignInMethodsForEmail,
+        sendPasswordResetEmail
+      } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
       const firebaseConfig = {{ firebase_config | tojson }};
       const nextPath = {{ next_path | tojson }};
@@ -33,46 +105,165 @@
       const app = initializeApp(firebaseConfig);
       const auth = getAuth(app);
       auth.useDeviceLanguage();
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
 
-      const errorEl = document.getElementById("error");
-      const toggleError = (message) => {
-        if (!message) {
-          errorEl.hidden = true;
-          return;
-        }
-        errorEl.hidden = false;
-        errorEl.textContent = message;
+      // --- DOM Elements ---
+      const form = document.getElementById("auth-form");
+      const emailInput = document.getElementById("email");
+      const nameGroup = document.getElementById("name-group");
+      const passwordGroup = document.getElementById("password-group");
+      const nameInput = document.getElementById("name");
+      const passwordInput = document.getElementById("password");
+      const googleSignInButton = document.getElementById("googleSignIn");
+      const continueBtn = document.getElementById("continue-btn");
+      const feedbackEl = document.getElementById("feedback");
+      const forgotPasswordLink = document.getElementById("forgot-password-link");
+
+      // --- State ---
+      let state = 'initial'; // initial, email-submitted, sign-in, sign-up
+      let userEmail = '';
+
+      // --- UI Functions ---
+      const showFeedback = (message, type = 'error') => {
+        feedbackEl.textContent = message;
+        feedbackEl.className = `feedback ${type}`;
       };
 
-      document.getElementById("googleSignIn").addEventListener("click", async () => {
-        toggleError("");
-        const button = document.getElementById("googleSignIn");
-        button.disabled = true;
+      const render = () => {
+        nameGroup.classList.toggle('hidden', state !== 'sign-up');
+        passwordGroup.classList.toggle('hidden', state !== 'sign-in' && state !== 'sign-up');
+        
+        if (state === 'sign-up') {
+          continueBtn.textContent = 'Create Account';
+          nameInput.required = true;
+          passwordInput.required = true;
+        } else if (state === 'sign-in') {
+          continueBtn.textContent = 'Sign In';
+          nameInput.required = false;
+          passwordInput.required = true;
+        } else {
+          continueBtn.textContent = 'Continue';
+          nameInput.required = false;
+          passwordInput.required = false;
+        }
+      };
+
+      const setLoading = (isLoading) => {
+        googleSignInButton.disabled = isLoading;
+        continueBtn.disabled = isLoading;
+        if (isLoading) {
+          continueBtn.textContent = 'Loading...';
+        } else {
+          render();
+        }
+      };
+
+      // --- Auth Logic ---
+      const sendIdTokenToServer = async (idToken) => {
+        const response = await fetch("{{ url_for('auth.session_login') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken, rememberMe: true })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Server rejected login request");
+        }
+        const data = await response.json();
+        const destination = data.is_new_user ? "/profile" : (nextPath || "/");
+        window.location.assign(destination);
+      };
+
+      // --- Event Handlers ---
+      googleSignInButton.addEventListener("click", async () => {
+        showFeedback("", "");
+        setLoading(true);
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
 
         try {
           const result = await signInWithPopup(auth, provider);
           const idToken = await getIdToken(result.user, true);
-          const rememberMe = document.getElementById('rememberMe').checked;
-          const response = await fetch("/auth/sessionLogin", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken, rememberMe })
-          });
-
-          if (!response.ok) {
-            throw new Error("Server rejected login request");
-          }
-
-          const destination = nextPath || "/";
-          window.location.assign(destination);
+          await sendIdTokenToServer(idToken);
         } catch (error) {
-          console.error("Firebase sign-in failed", error);
-          toggleError("We couldn't sign you in. Please try again.");
-          button.disabled = false;
+          console.error("Google sign-in failed", error);
+          showFeedback("We couldn't sign you in with Google. Please try again.");
+          setLoading(false);
         }
       });
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        showFeedback("", "");
+        setLoading(true);
+        userEmail = emailInput.value;
+
+        try {
+          if (state === 'initial') {
+            const methods = await fetchSignInMethodsForEmail(auth, userEmail);
+            state = methods.length > 0 ? 'sign-in' : 'sign-up';
+            render();
+          } else if (state === 'sign-in') {
+            const result = await signInWithEmailAndPassword(auth, userEmail, passwordInput.value);
+            const idToken = await getIdToken(result.user, true);
+            await sendIdTokenToServer(idToken);
+          } else if (state === 'sign-up') {
+            const userCredential = await createUserWithEmailAndPassword(auth, userEmail, passwordInput.value);
+            await updateProfile(userCredential.user, { displayName: nameInput.value });
+            const idToken = await getIdToken(userCredential.user, true);
+            await sendIdTokenToServer(idToken);
+          }
+        } catch (error) {
+          console.error("Auth process failed", error);
+          let message = "An unexpected error occurred. Please try again.";
+          switch (error.code) {
+            case 'auth/invalid-credential':
+            case 'auth/wrong-password':
+              message = "Invalid password. Please try again.";
+              break;
+            case 'auth/email-already-in-use':
+              message = "An account with this email already exists. Please sign in.";
+              state = 'sign-in';
+              render();
+              break;
+            case 'auth/weak-password':
+              message = "Password is too weak. Please choose a stronger password (at least 6 characters).";
+              break;
+            case 'auth/invalid-email':
+              message = "Please enter a valid email address.";
+              state = 'initial';
+              render();
+              break;
+          }
+          showFeedback(message);
+        } finally {
+          setLoading(false);
+        }
+      });
+
+      forgotPasswordLink.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const email = emailInput.value;
+        if (!email) {
+          showFeedback("Please enter your email address to reset your password.");
+          return;
+        }
+        
+        setLoading(true);
+        showFeedback("", "");
+        try {
+          await sendPasswordResetEmail(auth, email);
+          showFeedback("Password reset email sent! Please check your inbox.", "success");
+        } catch (error) {
+          console.error("Password reset failed", error);
+          showFeedback("Could not send password reset email. Please check the address and try again.");
+        } finally {
+          setLoading(false);
+        }
+      });
+
+      // Initial render
+      render();
     </script>
   </body>
 </html>

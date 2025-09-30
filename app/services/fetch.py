@@ -113,12 +113,16 @@ _HYBRID_HEADER_PROFILES = _compute_hybrid_profiles()
 def _build_headers(user_agent: Optional[str]) -> dict[str, str]:
     headers = {
         "User-Agent": user_agent or USER_AGENT,
-        "Accept-Language": random.choice(ACCEPT_LANG_OPTIONS)
-        if ACCEPT_LANG_OPTIONS
-        else "en-US,en;q=0.9",
-        "Accept": random.choice(ACCEPT_HEADER_OPTIONS)
-        if ACCEPT_HEADER_OPTIONS
-        else "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": (
+            random.choice(ACCEPT_LANG_OPTIONS)
+            if ACCEPT_LANG_OPTIONS
+            else "en-US,en;q=0.9"
+        ),
+        "Accept": (
+            random.choice(ACCEPT_HEADER_OPTIONS)
+            if ACCEPT_HEADER_OPTIONS
+            else "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ),
         "Cache-Control": "no-cache",
     }
     return headers

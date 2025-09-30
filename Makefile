@@ -17,6 +17,11 @@ IMAGE_REGISTRY = $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT_ID)/$(AR_REPOSITORY)
 GIT_SHA = $(shell git rev-parse --short HEAD 2>/dev/null || /bin/date +%s)
 IMAGE_TAG = $(IMAGE_REGISTRY)/$(APP_NAME):$(GIT_SHA)
 LATEST_TAG = $(IMAGE_REGISTRY)/$(APP_NAME):latest
+BLACK = $(VENV_DIR)/bin/black
+RUFF = $(VENV_DIR)/bin/ruff
+MYPY = $(VENV_DIR)/bin/mypy
+PYTEST = $(VENV_DIR)/bin/pytest
+PYTHON_BIN = $(VENV_DIR)/bin/python
 
 help:
 	@echo "Commands for Zissou:"
@@ -47,21 +52,21 @@ install:
 dev: $(VENV_DIR)/bin/activate
 	@echo "Starting Flask development server..."
 	@cp -n .env.example .env || true
-	$(VENV_DIR)/bin/python -m dotenv run -- FLASK_APP=app/main.py $(FLASK) run -p 8080
+	$(PYTHON_BIN) -m dotenv run -- FLASK_APP=app/main.py $(FLASK) run -p 8080
 
 # Quality & Testing
-fmt:
-	$(VENV_DIR)/bin/black .
-	$(VENV_DIR)/bin/ruff --fix .
+fmt: $(VENV_DIR)/bin/activate
+	$(BLACK) .
+	$(RUFF) check --fix .
 
-lint:
-	$(VENV_DIR)/bin/ruff .
+lint: $(VENV_DIR)/bin/activate
+	$(RUFF) check .
 
-typecheck:
-	$(VENV_DIR)/bin/mypy app/
+typecheck: $(VENV_DIR)/bin/activate
+	$(MYPY) app/
 
-test:
-	$(VENV_DIR)/bin/pytest
+test: $(VENV_DIR)/bin/activate
+	$(PYTEST)
 
 # Docker & Deployment
 build:
@@ -71,9 +76,10 @@ build:
 	@echo "Tagged image as: $(LATEST_TAG)"
 
 run:
-	@echo "Starting application with Docker Compose..."
-	@cp -n .env.example .env || true
-	docker compose up --build
+	. ./.venv/bin/activate && gunicorn --bind 0.0.0.0:8080 --workers 2 --threads 4 --worker-class gthread app.main:app
+
+grant-admin-role: $(VENV_DIR)/bin/activate
+	@$(PYTHON_BIN) tools/manage_user.py --email $(email) --role admin
 
 deploy:
 	@echo "Deploying to Cloud Run..."

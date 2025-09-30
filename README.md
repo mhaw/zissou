@@ -133,6 +133,8 @@ After the first deployment, you must add the service's URL to your `.env` file. 
     ./infra/deploy_cloud_run.sh
     ```
 
+When `AUTH_ENABLED=true`, Cloud Tasks must be able to mint OIDC tokens with the `SERVICE_ACCOUNT_EMAIL` you configure. Ensure the account has permission to invoke the service and that `SERVICE_URL` points at the deployed HTTPS entrypoint—missing values now cause startup to fail fast with a clear error message.
+
 ## Configuration
 
 ### Authentication

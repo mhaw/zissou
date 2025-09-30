@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -15,8 +15,8 @@ class Item:
     audioSizeBytes: int = 0
     durationSeconds: float = 0.0
     buckets: list[str] = field(default_factory=list)
-    createdAt: datetime = field(default_factory=datetime.utcnow)
-    updatedAt: datetime = field(default_factory=datetime.utcnow)
+    createdAt: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updatedAt: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Processing metrics
     processingTimeMs: int = 0

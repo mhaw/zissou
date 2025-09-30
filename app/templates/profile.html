@@ -7,6 +7,25 @@
     <h1 class="text-3xl font-bold mb-2">Your Profile</h1>
     <p class="text-gray-600 mb-4">Update your settings.</p>
 
+    {% if not g.user.is_mfa %}
+    <div class="my-4 p-4 rounded-md bg-yellow-50 border border-yellow-200">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 3.01-1.742 3.01H4.42c-1.53 0-2.493-1.676-1.743-3.01l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <h3 class="text-sm font-medium text-yellow-800">Enhance Your Account Security</h3>
+                <div class="mt-2 text-sm text-yellow-700">
+                    <p>For better protection, we recommend enabling multi-factor authentication (MFA) on your Google account. </p>
+                    <p class="mt-1"><a href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer" class="font-bold text-yellow-800 hover:underline">Visit Google Account Security &rarr;</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <form method="post">
         <div class="mb-4">
             <label for="default_voice" class="block text-sm font-medium text-gray-700">Default Voice</label>
@@ -51,6 +70,14 @@
             </div>
         </dl>
     </div>
+
+    <div class="mt-8 pt-8 border-t border-gray-200">
+        <h2 class="text-2xl font-bold mb-4 text-red-600">Danger Zone</h2>
+        <p class="text-gray-600 mb-4">This action is permanent and cannot be undone. This will delete your account and all associated data.</p>
+        <button type="button" id="delete-account-btn" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+            Delete My Account
+        </button>
+    </div>
 </div>
 
 <script>
@@ -74,9 +101,32 @@
         }
 
         voiceSelect.addEventListener('change', updateVoicePreview);
-
-        // Initialize preview on page load if a voice is already selected
         updateVoicePreview();
+
+        const deleteBtn = document.getElementById('delete-account-btn');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', function() {
+                const confirmation = prompt('This action is permanent. To confirm, please type \"delete my account\" and click OK.');
+                if (confirmation === 'delete my account') {
+                    fetch('{{ url_for("main.delete_account") }}', {
+                        method: 'POST',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    }).then(response => {
+                        if (response.ok) {
+                            alert('Your account has been deleted.');
+                            window.location.href = '/';
+                        } else {
+                            alert('Failed to delete account. Please try again.');
+                        }
+                    }).catch(error => {
+                        console.error('Delete account error:', error);
+                        alert('An error occurred while deleting your account.');
+                    });
+                }
+            });
+        }
     });
 </script>
 {% endblock %}

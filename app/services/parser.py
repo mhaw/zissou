@@ -4,6 +4,7 @@ import re
 import inspect
 from collections import Counter
 from typing import Callable, Optional, Tuple, Any
+from dataclasses import dataclass
 
 import trafilatura
 
@@ -28,14 +29,6 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 from trafilatura.settings import use_config  # type: ignore[import-untyped]
 
 from app.utils.text_cleaner import clean_text
-
-def calculate_reading_time(text: str, words_per_minute: int = 200) -> int:
-    """Calculates the estimated reading time in minutes for a given text."""
-    words = text.split()
-    num_words = len(words)
-    reading_time = num_words / words_per_minute
-    return max(1, int(round(reading_time)))
-
 from app.services.fetch import (
     REQUEST_TIMEOUT_SECONDS,
     USER_AGENT,
@@ -45,6 +38,15 @@ from app.services.fetch import (
     is_likely_truncated,
     recover_truncated_content,
 )
+
+
+def calculate_reading_time(text: str, words_per_minute: int = 200) -> int:
+    """Calculates the estimated reading time in minutes for a given text."""
+    words = text.split()
+    num_words = len(words)
+    reading_time = num_words / words_per_minute
+    return max(1, int(round(reading_time)))
+
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +79,6 @@ ENGINE_PIPELINE_ORDER: Tuple[str, ...] = (
 )
 
 
-from dataclasses import dataclass
-
 @dataclass
 class ArticleParseResult:
     title: str
@@ -87,6 +87,7 @@ class ArticleParseResult:
     image_url: Optional[str]
     text: str
     reading_time: int = 0
+
 
 try:
     _TRAFILATURA_METADATA_SUPPORTS_CONFIG = (
@@ -286,7 +287,9 @@ def _process_html(
         best_result["extractor_metrics"] = _build_metrics_snapshot(
             metrics_winner, winning_engine
         )
-        best_result["reading_time"] = calculate_reading_time(best_result.get("text", ""))
+        best_result["reading_time"] = calculate_reading_time(
+            best_result.get("text", "")
+        )
         return best_result
 
     error_message = errors[0] if errors else "No extractor produced text."
@@ -570,13 +573,13 @@ def _extract_with_plaintext(
                 title = (
                     title_node
                     if isinstance(title_node, str)
-                    else title_node.get_text(strip=True) # type: ignore[attr-defined]
+                    else title_node.get_text(strip=True)  # type: ignore[attr-defined]
                 ) or "Untitled"
             except Exception:  # pragma: no cover - defensive guard
                 title = "Untitled"
         meta_author = soup.find("meta", attrs={"name": "author"})
-        if meta_author and meta_author.get("content"): # type: ignore[attr-defined]
-            author = meta_author.get("content").strip() or "Unknown" # type: ignore[attr-defined]
+        if meta_author and meta_author.get("content"):  # type: ignore[attr-defined]
+            author = meta_author.get("content").strip() or "Unknown"  # type: ignore[attr-defined]
 
     return {
         "title": title,
@@ -620,9 +623,9 @@ def _extract_with_newspaper(
         "text": clean_text(article.text),
         "source_url": source_url or url,
         "resolved_url": url,
-        "published_date": article.publish_date.isoformat()
-        if article.publish_date
-        else None,
+        "published_date": (
+            article.publish_date.isoformat() if article.publish_date else None
+        ),
         "image_url": article.top_image if article.top_image else None,
         "parser": "newspaper3k",
     }

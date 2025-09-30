@@ -141,7 +141,9 @@ def generate_feed_for_bucket(
         raise ValueError(f"Bucket with slug '{bucket_slug}' not found.")
 
     list_items_fn = getattr(list_items, "__wrapped__", list_items)
-    all_items, _ = list_items_fn(user_id="dummy_user_id", bucket_slug=bucket.slug, limit=200)
+    all_items, _ = list_items_fn(
+        user_id="dummy_user_id", bucket_slug=bucket.slug, limit=200
+    )
 
     per_page = 50
     start_index = (page - 1) * per_page

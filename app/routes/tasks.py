@@ -9,7 +9,7 @@ import html
 import tempfile
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
-from datetime import datetime
+from datetime import datetime, timezone
 
 from dateutil import parser as date_parser
 from flask import Blueprint, jsonify, g, request
@@ -19,7 +19,6 @@ from app.models.item import Item
 from app.services import buckets as buckets_service
 from app.services import (
     items as items_service,
-    buckets as buckets_service,
     parser,
     storage,
     tts,
@@ -77,6 +76,36 @@ class TaskErrorCodes:
 
 class ParsingError(Exception):
     """Raised when article parsing fails."""
+
+
+def _verify_headers(req):
+    """Validate Cloud Tasks headers to guard against spoofed requests."""
+    required_headers = (
+        "X-CloudTasks-QueueName",
+        "X-CloudTasks-TaskName",
+        "X-CloudTasks-TaskRetryCount",
+    )
+    missing = [header for header in required_headers if header not in req.headers]
+    if missing:
+        logger.error("Task request missing Cloud Tasks headers: %s", ", ".join(missing))
+        return None, f"Missing Cloud Tasks headers: {', '.join(missing)}"
+
+    queue_header = req.headers.get("X-CloudTasks-QueueName", "")
+    expected_queue = os.getenv("CLOUD_TASKS_QUEUE") or os.getenv("QUEUE")
+    if expected_queue:
+        expected_suffix = f"/queues/{expected_queue}".lower()
+        normalized = queue_header.lower()
+        if not (
+            normalized.endswith(expected_suffix) or normalized == expected_queue.lower()
+        ):
+            logger.error(
+                "Task request queue mismatch. Expected suffix %s, received %s",
+                expected_suffix,
+                queue_header,
+            )
+            return None, "Unexpected Cloud Tasks queue"
+
+    return True, None
 
 
 def _verify_token(req):
@@ -232,6 +261,13 @@ def _build_ssml_fragment(text: str, *, break_after: bool = False) -> str:
 def process_task_handler():
     """The webhook handler for Google Cloud Tasks."""
 
+    _, header_error = _verify_headers(request)
+    if header_error:
+        return (
+            jsonify({"status": "error", "message": f"Unauthorized: {header_error}"}),
+            403,
+        )
+
     _, error_message = _verify_token(request)
     if error_message:
         return (
@@ -248,6 +284,7 @@ def process_task_handler():
         url = payload.get("url")
         voice = payload.get("voice")
         bucket_id = payload.get("bucket_id")
+        user_id = payload.get("user_id")
 
         if not task_id or not url:
             return (
@@ -278,7 +315,7 @@ def process_task_handler():
         if task:
             voice = voice or task.voice
             bucket_id = bucket_id or task.bucket_id
-            user_id = user_id or task.userId # Use task.userId if not in payload
+            user_id = user_id or task.userId  # Use task.userId if not in payload
 
         process_article_task(task_id, url, voice, bucket_id, user_id)
 
@@ -298,7 +335,7 @@ def process_task_handler():
 def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None):
     """The background task for processing an article."""
     logger.info("Task %s: Starting processing for URL: %s", task_id, url)
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     parsing_ms = 0
     tts_ms = 0
@@ -451,7 +488,7 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         tasks_service.update_task(task_id, status="SAVING_ITEM")
 
         processing_time_ms = int(
-            (datetime.utcnow() - start_time).total_seconds() * 1000
+            (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         )
         pipeline_tools = list(
             dict.fromkeys([parser_name, "google-tts", "gcs", "pydub"])
@@ -486,7 +523,7 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
             if smart_buckets_service.evaluate_item(new_item, smart_bucket.rules):
                 if smart_bucket.id not in new_item.buckets:
                     new_item.buckets.append(smart_bucket.id)
-        
+
         if new_item.buckets:
             items_service.update_item_buckets(item_id, new_item.buckets)
 

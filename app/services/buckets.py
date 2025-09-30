@@ -15,7 +15,7 @@ from app.services.firestore_helpers import (
 # Use the shared client from the items service to ensure single instantiation
 from .items import db, FirestoreError
 
-from typing import Callable, List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,9 @@ def get_bucket_by_slug(slug: str) -> Bucket | None:
             return None
         return _doc_to_bucket(docs[0])
     except GoogleCloudError as e:
-        logger.error(f"Firestore error retrieving bucket by slug {slug}: {e}")
+        logger.error(
+            f"Firestore error retrieving bucket by slug {slug}: {e}", exc_info=True
+        )
         raise FirestoreError(
             f"Failed to retrieve bucket by slug {slug} from Firestore."
         ) from e
@@ -92,7 +94,9 @@ def get_bucket(bucket_id: str) -> Bucket | None:
             return None
         return _doc_to_bucket(doc)
     except GoogleCloudError as e:
-        logger.error(f"Firestore error retrieving bucket {bucket_id}: {e}")
+        logger.error(
+            f"Firestore error retrieving bucket {bucket_id}: {e}", exc_info=True
+        )
         raise FirestoreError(
             f"Failed to retrieve bucket {bucket_id} from Firestore."
         ) from e
@@ -107,7 +111,7 @@ def list_buckets() -> list[Bucket]:
         docs = buckets_ref.stream()
         return [_doc_to_bucket(doc) for doc in docs]
     except GoogleCloudError as e:
-        logger.error(f"Firestore error listing buckets: {e}")
+        logger.error(f"Firestore error listing buckets: {e}", exc_info=True)
         raise FirestoreError("Failed to list buckets from Firestore.") from e
 
 
@@ -157,7 +161,37 @@ def create_bucket(
         )
         return bucket_ref.id
     except GoogleCloudError as e:
-        logger.error(f"Firestore error creating bucket {name} ({slug}): {e}")
+        logger.error(
+            f"Firestore error creating bucket {name} ({slug}): {e}", exc_info=True
+        )
         raise FirestoreError(
             f"Failed to create bucket {name} ({slug}) in Firestore."
         ) from e
+
+
+def _run_count(query) -> int:
+    """Helper to run a count aggregation query against Firestore."""
+    try:
+        count_query = query.count()
+        count_results = list(count_query.get())
+        if count_results:
+            try:
+                return count_results[0][0].value
+            except (IndexError, TypeError, AttributeError):
+                aggregation_result = count_results[0]
+                if hasattr(aggregation_result, "value"):
+                    return aggregation_result.value
+    except (GoogleCloudError, AttributeError):
+        logger.debug("Count aggregation not available, falling back to streaming.")
+    return sum(1 for _ in query.stream())
+
+
+def get_bucket_count() -> int:
+    """Returns the total number of buckets."""
+    _require_db()
+    try:
+        buckets_ref = db.collection(BUCKETS_COLLECTION)
+        return _run_count(buckets_ref)
+    except GoogleCloudError as e:
+        logger.error(f"Firestore error getting bucket count: {e}", exc_info=True)
+        return 0
