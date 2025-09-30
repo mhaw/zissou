@@ -36,3 +36,4 @@ opentelemetry-sdk
 opentelemetry-exporter-gcp-trace
 opentelemetry-instrumentation-flask
 
+whitenoise

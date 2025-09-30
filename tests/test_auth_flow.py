@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import g
 
+from app.auth import COOKIE_NAME
 from app.main import create_app
 
 
@@ -69,7 +70,9 @@ def test_admin_route_allows_admin(mock_ensure_user, client):
 @patch("app.routes.auth.users_service.get_or_create_user")
 @patch("app.routes.auth.firebase_auth.create_session_cookie")
 @patch("app.routes.auth.firebase_auth.verify_id_token")
+@patch("app.routes.auth.users_service.db")
 def test_session_login_sets_cookie_attributes(
+    mock_db,
     mock_verify_id_token,
     mock_create_session_cookie,
     mock_get_or_create_user,
@@ -82,6 +85,7 @@ def test_session_login_sets_cookie_attributes(
         }
     )
 
+    mock_db.transaction.return_value = MagicMock()
     decoded_token = {"uid": "user123", "email": "user@example.com", "name": "User"}
     mock_verify_id_token.return_value = decoded_token
     mock_create_session_cookie.return_value = "session-token"
@@ -99,15 +103,68 @@ def test_session_login_sets_cookie_attributes(
         json={"idToken": "token-value", "rememberMe": False},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 302
+    location = response.headers.get("Location")
+    assert location in {"/", "http://localhost/"}
 
     cookie_headers = response.headers.getlist("Set-Cookie")
-    session_cookie_header = next(
-        header for header in cookie_headers if "__zissou_session" in header
-    )
+    assert len(cookie_headers) == 1
+    session_cookie_header = cookie_headers[0]
 
+    assert f"{COOKIE_NAME}=" in session_cookie_header
     assert "Path=/" in session_cookie_header
     assert "Secure" in session_cookie_header
     assert "HttpOnly" in session_cookie_header
     assert "SameSite=None" in session_cookie_header
     assert "Domain=" not in session_cookie_header
+
+
+@patch("app.routes.main.users_service.get_user")
+@patch("app.routes.main.buckets_service.list_buckets")
+@patch("app.routes.auth.users_service.get_or_create_user")
+@patch("app.routes.auth.firebase_auth.create_session_cookie")
+@patch("app.routes.auth.firebase_auth.verify_id_token")
+@patch("app.auth.firebase_auth.verify_session_cookie")
+@patch("app.routes.auth.users_service.db")
+def test_session_login_e2e_flow(
+    mock_db,
+    mock_verify_session_cookie,
+    mock_verify_id_token,
+    mock_create_session_cookie,
+    mock_get_or_create_user,
+    mock_list_buckets,
+    mock_get_user,
+    client,
+):
+    mock_db.transaction.return_value = MagicMock()
+    decoded_token = {"uid": "user123", "email": "user@example.com", "name": "User"}
+    mock_verify_id_token.return_value = decoded_token
+    mock_create_session_cookie.return_value = "session-token"
+    mock_verify_session_cookie.return_value = decoded_token
+
+    fake_user = SimpleNamespace(id="user123", email="user@example.com", role="member")
+    fake_user.to_dict = lambda: {
+        "id": fake_user.id,
+        "email": fake_user.email,
+        "role": fake_user.role,
+    }
+    mock_get_or_create_user.return_value = (fake_user, False)
+    mock_get_user.return_value = fake_user
+    mock_list_buckets.return_value = []
+
+    login_page = client.get("/auth/login", query_string={"next": "/profile"})
+    assert login_page.status_code == 200
+
+    response = client.post(
+        "/auth/sessionLogin",
+        json={"idToken": "token-value", "rememberMe": False, "next": "/profile"},
+    )
+
+    assert response.status_code == 302
+    location = response.headers.get("Location")
+    assert location in {"/profile", "http://localhost/profile"}
+
+    profile_response = client.get("/profile")
+    assert profile_response.status_code == 200
+    session_cookie = client.get_cookie(COOKIE_NAME)
+    assert session_cookie is not None

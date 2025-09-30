@@ -41106,3 +41106,908 @@ ERROR: (gcloud.run.services.update) unrecognized arguments:
   --liveness-probe-initial-delay-seconds=30
   To search the help text of gcloud commands, run:
   gcloud help -- SEARCH_TERMS
+
+[2025-09-30 02:50:25+0000] === Initializing deploy ===
+[2025-09-30 02:50:25+0000] Loading environment variables from .env
+[2025-09-30 02:50:27+0000] Revision suffix 'zissou-502ead6' exists; using 'zissou-502ead6-20250930025027' instead
+
+[2025-09-30 02:50:27+0000] === Pre-flight checks ===
+[2025-09-30 02:50:28+0000] Authenticating Docker client for us-central1-docker.pkg.dev
+WARNING: Your config file at [/home/mhaw/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "us-central1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-central1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+[2025-09-30 02:50:28+0000] === Building container image ===
+[2025-09-30 02:50:28+0000] Building image us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:502ead6
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.08kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.2s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 289B done
+#3 DONE 0.0s
+
+#4 [builder 1/6] FROM docker.io/library/python:3.11-slim@sha256:a0939570b38cddeb861b8e75d20b1c8218b21562b18f301171904b544e8cf228
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 9.78kB done
+#5 DONE 0.0s
+
+#6 [builder 2/6] WORKDIR /app
+#6 CACHED
+
+#7 [builder 3/6] RUN apt-get update && apt-get install -y build-essential
+#7 CACHED
+
+#8 [runtime 4/7] COPY --from=builder /opt/venv /opt/venv
+#8 CACHED
+
+#9 [builder 5/6] COPY requirements.txt .
+#9 CACHED
+
+#10 [runtime 3/7] WORKDIR /app
+#10 CACHED
+
+#11 [builder 4/6] RUN python -m venv /opt/venv
+#11 CACHED
+
+#12 [builder 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#12 CACHED
+
+#13 [runtime 2/7] RUN groupadd -r zissou && useradd -r -g zissou zissou
+#13 CACHED
+
+#14 [runtime 5/7] RUN apt-get update && apt-get install -y ffmpeg
+#14 CACHED
+
+#15 [runtime 6/7] COPY --chown=zissou:zissou . .
+#15 DONE 0.1s
+
+#16 [runtime 7/7] COPY run.sh .
+#16 DONE 0.0s
+
+#17 exporting to image
+#17 exporting layers 0.1s done
+#17 writing image sha256:e0c8364d433d5f2f2f2c24e23cf6e57cc7e1e6ed3203263b75c3c4420dfe4164 done
+#17 naming to us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:502ead6 done
+#17 DONE 0.1s
+[2025-09-30 02:50:29+0000] Pushing image tags
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+597c5e32658c: Preparing
+9e48ecd5f0b8: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+b31489489aea: Waiting
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+d03f61aa9232: Layer already exists
+b31489489aea: Layer already exists
+8d441cbfbc35: Layer already exists
+49dd736005c7: Layer already exists
+daf557c4f08e: Layer already exists
+135aac4d5c9a: Layer already exists
+597c5e32658c: Pushed
+9e48ecd5f0b8: Pushed
+502ead6: digest: sha256:b4b8d8893acd0a609f182fb6a4638a22df43a6f0595e78b92a5c7aa0b9432013 size: 2417
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+597c5e32658c: Preparing
+9e48ecd5f0b8: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+b31489489aea: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+9e48ecd5f0b8: Layer already exists
+597c5e32658c: Layer already exists
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+d03f61aa9232: Layer already exists
+8d441cbfbc35: Layer already exists
+49dd736005c7: Layer already exists
+b31489489aea: Layer already exists
+daf557c4f08e: Layer already exists
+135aac4d5c9a: Layer already exists
+latest: digest: sha256:b4b8d8893acd0a609f182fb6a4638a22df43a6f0595e78b92a5c7aa0b9432013 size: 2417
+
+[2025-09-30 02:50:36+0000] === Preparing runtime configuration ===
+
+[2025-09-30 02:50:36+0000] === Deploying to Cloud Run ===
+Deploying container to Cloud Run service [[1mzissou[m] in project [[1mzissou-471603[m] region [[1mus-central1[m]
+Deploying...
+Setting IAM Policy.............done
+Creating Revision...................................................................done
+Routing traffic.....done
+Done.
+Service [[1mzissou[m] revision [[1mzissou-zissou-502ead6-20250930025027[m] has been deployed and is serving [1m100[m percent of traffic.
+Service URL: [1mhttps://zissou-498379484787.us-central1.run.app[m
+
+[2025-09-30 02:50:45+0000] === Configuring health checks ===
+ERROR: (gcloud.run.services.update) unrecognized arguments:
+  --liveness-probe-request-path=/health (did you mean '--liveness-probe'?)
+  --liveness-probe-initial-delay-seconds=30
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS
+
+[2025-09-30 03:37:42+0000] === Initializing deploy ===
+[2025-09-30 03:37:42+0000] Loading environment variables from .env
+[2025-09-30 03:37:43+0000] Revision suffix 'zissou-502ead6' exists; using 'zissou-502ead6-20250930033743' instead
+
+[2025-09-30 03:37:43+0000] === Pre-flight checks ===
+[2025-09-30 03:37:44+0000] Authenticating Docker client for us-central1-docker.pkg.dev
+WARNING: Your config file at [/home/mhaw/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "us-central1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-central1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+[2025-09-30 03:37:45+0000] === Building container image ===
+[2025-09-30 03:37:45+0000] Building image us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:502ead6
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.08kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.3s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 289B done
+#3 DONE 0.0s
+
+#4 [builder 1/6] FROM docker.io/library/python:3.11-slim@sha256:a0939570b38cddeb861b8e75d20b1c8218b21562b18f301171904b544e8cf228
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 179.93kB 0.0s done
+#5 DONE 0.0s
+
+#6 [builder 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#6 CACHED
+
+#7 [builder 3/6] RUN apt-get update && apt-get install -y build-essential
+#7 CACHED
+
+#8 [builder 4/6] RUN python -m venv /opt/venv
+#8 CACHED
+
+#9 [builder 5/6] COPY requirements.txt .
+#9 CACHED
+
+#10 [builder 2/6] WORKDIR /app
+#10 CACHED
+
+#11 [runtime 2/7] RUN groupadd -r zissou && useradd -r -g zissou zissou
+#11 CACHED
+
+#12 [runtime 4/7] COPY --from=builder /opt/venv /opt/venv
+#12 CACHED
+
+#13 [runtime 3/7] WORKDIR /app
+#13 CACHED
+
+#14 [runtime 5/7] RUN apt-get update && apt-get install -y ffmpeg
+#14 CACHED
+
+#15 [runtime 6/7] COPY --chown=zissou:zissou . .
+#15 DONE 0.1s
+
+#16 [runtime 7/7] COPY run.sh .
+#16 DONE 0.0s
+
+#17 exporting to image
+#17 exporting layers 0.1s done
+#17 writing image sha256:ebbea54395d409d0e130092adf575235587f29df574b81ae63c1e171cbd0cb76 done
+#17 naming to us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:502ead6 done
+#17 DONE 0.1s
+[2025-09-30 03:37:46+0000] Pushing image tags
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+6a098874c5e0: Preparing
+fff92836c6bc: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+b31489489aea: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+d03f61aa9232: Layer already exists
+49dd736005c7: Layer already exists
+b31489489aea: Layer already exists
+8d441cbfbc35: Layer already exists
+135aac4d5c9a: Layer already exists
+daf557c4f08e: Layer already exists
+6a098874c5e0: Pushed
+fff92836c6bc: Pushed
+502ead6: digest: sha256:1430d3ac89dcb16f19ebf250f70f1f0269f28859eba94e6b8f7726e7bc2821d6 size: 2417
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+6a098874c5e0: Preparing
+fff92836c6bc: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+b31489489aea: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+6a098874c5e0: Layer already exists
+d03f61aa9232: Layer already exists
+fff92836c6bc: Layer already exists
+b31489489aea: Layer already exists
+8d441cbfbc35: Layer already exists
+daf557c4f08e: Layer already exists
+135aac4d5c9a: Layer already exists
+49dd736005c7: Layer already exists
+latest: digest: sha256:1430d3ac89dcb16f19ebf250f70f1f0269f28859eba94e6b8f7726e7bc2821d6 size: 2417
+
+[2025-09-30 03:37:52+0000] === Preparing runtime configuration ===
+
+[2025-09-30 03:37:52+0000] === Deploying to Cloud Run ===
+Deploying container to Cloud Run service [[1mzissou[m] in project [[1mzissou-471603[m] region [[1mus-central1[m]
+Deploying...
+Setting IAM Policy.............done
+Creating Revision.................................................................done
+Routing traffic.....done
+Done.
+Service [[1mzissou[m] revision [[1mzissou-zissou-502ead6-20250930033743[m] has been deployed and is serving [1m100[m percent of traffic.
+Service URL: [1mhttps://zissou-498379484787.us-central1.run.app[m
+
+[2025-09-30 03:38:02+0000] === Configuring health checks ===
+ERROR: (gcloud.run.services.update) unrecognized arguments:
+  --liveness-probe-request-path=/health (did you mean '--liveness-probe'?)
+  --liveness-probe-initial-delay-seconds=30
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS
+
+[2025-09-30 03:51:36+0000] === Initializing deploy ===
+[2025-09-30 03:51:36+0000] Loading environment variables from .env
+[2025-09-30 03:51:37+0000] Revision suffix 'zissou-502ead6' exists; using 'zissou-502ead6-20250930035137' instead
+
+[2025-09-30 03:51:37+0000] === Pre-flight checks ===
+[2025-09-30 03:51:39+0000] Authenticating Docker client for us-central1-docker.pkg.dev
+WARNING: Your config file at [/home/mhaw/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "us-central1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-central1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+[2025-09-30 03:51:39+0000] === Building container image ===
+[2025-09-30 03:51:39+0000] Building image us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:502ead6
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.08kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.2s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 289B done
+#3 DONE 0.0s
+
+#4 [builder 1/6] FROM docker.io/library/python:3.11-slim@sha256:a0939570b38cddeb861b8e75d20b1c8218b21562b18f301171904b544e8cf228
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 17.60kB 0.0s done
+#5 DONE 0.0s
+
+#6 [builder 5/6] COPY requirements.txt .
+#6 CACHED
+
+#7 [builder 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#7 CACHED
+
+#8 [runtime 2/7] RUN groupadd -r zissou && useradd -r -g zissou zissou
+#8 CACHED
+
+#9 [runtime 3/7] WORKDIR /app
+#9 CACHED
+
+#10 [builder 3/6] RUN apt-get update && apt-get install -y build-essential
+#10 CACHED
+
+#11 [builder 4/6] RUN python -m venv /opt/venv
+#11 CACHED
+
+#12 [runtime 4/7] COPY --from=builder /opt/venv /opt/venv
+#12 CACHED
+
+#13 [builder 2/6] WORKDIR /app
+#13 CACHED
+
+#14 [runtime 5/7] RUN apt-get update && apt-get install -y ffmpeg
+#14 CACHED
+
+#15 [runtime 6/7] COPY --chown=zissou:zissou . .
+#15 DONE 0.1s
+
+#16 [runtime 7/7] COPY run.sh .
+#16 DONE 0.0s
+
+#17 exporting to image
+#17 exporting layers 0.1s done
+#17 writing image sha256:4cf3dde5a46e90ca7d53bb328117a1e2a24883e9c92cce3104dcf3daae9dfc73 done
+#17 naming to us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:502ead6 done
+#17 DONE 0.1s
+[2025-09-30 03:51:40+0000] Pushing image tags
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+2ebf53e9d61e: Preparing
+59501ecdafe7: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+daf557c4f08e: Waiting
+135aac4d5c9a: Waiting
+b31489489aea: Waiting
+d03f61aa9232: Layer already exists
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+8d441cbfbc35: Layer already exists
+b31489489aea: Layer already exists
+135aac4d5c9a: Layer already exists
+49dd736005c7: Layer already exists
+daf557c4f08e: Layer already exists
+2ebf53e9d61e: Pushed
+59501ecdafe7: Pushed
+502ead6: digest: sha256:0b938c7afd523449ca6d4149cd7cdcb1336172d498c183fe9f33040945fe35ff size: 2417
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+2ebf53e9d61e: Preparing
+59501ecdafe7: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+b31489489aea: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+ce15a1e93369: Layer already exists
+59501ecdafe7: Layer already exists
+2ebf53e9d61e: Layer already exists
+69df91f8bf85: Layer already exists
+8d441cbfbc35: Layer already exists
+d03f61aa9232: Layer already exists
+49dd736005c7: Layer already exists
+b31489489aea: Layer already exists
+daf557c4f08e: Layer already exists
+135aac4d5c9a: Layer already exists
+latest: digest: sha256:0b938c7afd523449ca6d4149cd7cdcb1336172d498c183fe9f33040945fe35ff size: 2417
+
+[2025-09-30 03:51:46+0000] === Preparing runtime configuration ===
+
+[2025-09-30 03:51:46+0000] === Deploying to Cloud Run ===
+Deploying container to Cloud Run service [[1mzissou[m] in project [[1mzissou-471603[m] region [[1mus-central1[m]
+Deploying...
+Setting IAM Policy.............done
+Creating Revision...............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................done
+Routing traffic.....done
+Done.
+Service [[1mzissou[m] revision [[1mzissou-zissou-502ead6-20250930035137[m] has been deployed and is serving [1m100[m percent of traffic.
+Service URL: [1mhttps://zissou-498379484787.us-central1.run.app[m
+
+[2025-09-30 03:53:13+0000] === Configuring health checks ===
+ERROR: (gcloud.run.services.update) unrecognized arguments:
+  --liveness-probe-request-path=/health (did you mean '--liveness-probe'?)
+  --liveness-probe-initial-delay-seconds=30
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS
+
+[2025-09-30 04:05:23+0000] === Initializing deploy ===
+[2025-09-30 04:05:23+0000] Loading environment variables from .env
+
+[2025-09-30 04:05:25+0000] === Pre-flight checks ===
+[2025-09-30 04:05:26+0000] Authenticating Docker client for us-central1-docker.pkg.dev
+WARNING: Your config file at [/home/mhaw/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "us-central1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-central1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+[2025-09-30 04:05:26+0000] === Building container image ===
+[2025-09-30 04:05:26+0000] Building image us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:25d0a0a
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.08kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.3s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 289B done
+#3 DONE 0.0s
+
+#4 [builder 1/6] FROM docker.io/library/python:3.11-slim@sha256:a0939570b38cddeb861b8e75d20b1c8218b21562b18f301171904b544e8cf228
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 32.72kB done
+#5 DONE 0.0s
+
+#6 [runtime 4/7] COPY --from=builder /opt/venv /opt/venv
+#6 CACHED
+
+#7 [builder 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#7 CACHED
+
+#8 [runtime 2/7] RUN groupadd -r zissou && useradd -r -g zissou zissou
+#8 CACHED
+
+#9 [builder 4/6] RUN python -m venv /opt/venv
+#9 CACHED
+
+#10 [builder 5/6] COPY requirements.txt .
+#10 CACHED
+
+#11 [runtime 3/7] WORKDIR /app
+#11 CACHED
+
+#12 [builder 2/6] WORKDIR /app
+#12 CACHED
+
+#13 [builder 3/6] RUN apt-get update && apt-get install -y build-essential
+#13 CACHED
+
+#14 [runtime 5/7] RUN apt-get update && apt-get install -y ffmpeg
+#14 CACHED
+
+#15 [runtime 6/7] COPY --chown=zissou:zissou . .
+#15 DONE 0.1s
+
+#16 [runtime 7/7] COPY run.sh .
+#16 DONE 0.0s
+
+#17 exporting to image
+#17 exporting layers 0.1s done
+#17 writing image sha256:0a93b45182261799bdd676416eae0010aeb180205cd01bbb44db2d4efeb7b71a done
+#17 naming to us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:25d0a0a done
+#17 DONE 0.1s
+[2025-09-30 04:05:27+0000] Pushing image tags
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+b7d40bc355b4: Preparing
+497aa46afc32: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+135aac4d5c9a: Waiting
+b31489489aea: Waiting
+daf557c4f08e: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+d03f61aa9232: Layer already exists
+69df91f8bf85: Layer already exists
+ce15a1e93369: Layer already exists
+b31489489aea: Layer already exists
+8d441cbfbc35: Layer already exists
+49dd736005c7: Layer already exists
+135aac4d5c9a: Layer already exists
+daf557c4f08e: Layer already exists
+b7d40bc355b4: Pushed
+497aa46afc32: Pushed
+25d0a0a: digest: sha256:c506574df7ffe6392b16e0f22f7bf3a6382a4d503d3add10de13ef22b19ee90b size: 2417
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+b7d40bc355b4: Preparing
+497aa46afc32: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+b31489489aea: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+497aa46afc32: Layer already exists
+d03f61aa9232: Layer already exists
+b7d40bc355b4: Layer already exists
+49dd736005c7: Layer already exists
+8d441cbfbc35: Layer already exists
+b31489489aea: Layer already exists
+daf557c4f08e: Layer already exists
+135aac4d5c9a: Layer already exists
+latest: digest: sha256:c506574df7ffe6392b16e0f22f7bf3a6382a4d503d3add10de13ef22b19ee90b size: 2417
+
+[2025-09-30 04:05:34+0000] === Preparing runtime configuration ===
+
+[2025-09-30 04:05:34+0000] === Deploying to Cloud Run ===
+Deploying container to Cloud Run service [[1mzissou[m] in project [[1mzissou-471603[m] region [[1mus-central1[m]
+Deploying...
+Setting IAM Policy.............done
+Creating Revision...................................................................................done
+Routing traffic.....done
+Done.
+Service [[1mzissou[m] revision [[1mzissou-zissou-25d0a0a[m] has been deployed and is serving [1m100[m percent of traffic.
+Service URL: [1mhttps://zissou-498379484787.us-central1.run.app[m
+
+[2025-09-30 04:05:45+0000] === Configuring health checks ===
+ERROR: (gcloud.run.services.update) unrecognized arguments:
+  --liveness-probe-request-path=/health (did you mean '--liveness-probe'?)
+  --liveness-probe-initial-delay-seconds=30
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS
+
+[2025-09-30 04:12:52+0000] === Initializing deploy ===
+[2025-09-30 04:12:52+0000] Loading environment variables from .env
+[2025-09-30 04:12:53+0000] Revision suffix 'zissou-25d0a0a' exists; using 'zissou-25d0a0a-20250930041253' instead
+
+[2025-09-30 04:12:53+0000] === Pre-flight checks ===
+[2025-09-30 04:12:54+0000] Authenticating Docker client for us-central1-docker.pkg.dev
+WARNING: Your config file at [/home/mhaw/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "us-central1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-central1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+[2025-09-30 04:12:55+0000] === Building container image ===
+[2025-09-30 04:12:55+0000] Building image us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:25d0a0a
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.08kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.2s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 289B done
+#3 DONE 0.0s
+
+#4 [builder 1/6] FROM docker.io/library/python:3.11-slim@sha256:a0939570b38cddeb861b8e75d20b1c8218b21562b18f301171904b544e8cf228
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 30.93kB done
+#5 DONE 0.0s
+
+#6 [builder 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#6 CACHED
+
+#7 [builder 5/6] COPY requirements.txt .
+#7 CACHED
+
+#8 [runtime 2/7] RUN groupadd -r zissou && useradd -r -g zissou zissou
+#8 CACHED
+
+#9 [builder 4/6] RUN python -m venv /opt/venv
+#9 CACHED
+
+#10 [builder 3/6] RUN apt-get update && apt-get install -y build-essential
+#10 CACHED
+
+#11 [builder 2/6] WORKDIR /app
+#11 CACHED
+
+#12 [runtime 4/7] COPY --from=builder /opt/venv /opt/venv
+#12 CACHED
+
+#13 [runtime 3/7] WORKDIR /app
+#13 CACHED
+
+#14 [runtime 5/7] RUN apt-get update && apt-get install -y ffmpeg
+#14 CACHED
+
+#15 [runtime 6/7] COPY --chown=zissou:zissou . .
+#15 DONE 0.1s
+
+#16 [runtime 7/7] COPY run.sh .
+#16 DONE 0.0s
+
+#17 exporting to image
+#17 exporting layers 0.1s done
+#17 writing image sha256:5ef0c41da6c5f687ff5da472a87254a0d2a56ac53ecae5918a0e62096d2d9176 done
+#17 naming to us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:25d0a0a done
+#17 DONE 0.1s
+[2025-09-30 04:12:56+0000] Pushing image tags
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+9341e123e5b0: Preparing
+15d52b142199: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+b31489489aea: Waiting
+135aac4d5c9a: Waiting
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+daf557c4f08e: Waiting
+ce15a1e93369: Layer already exists
+d03f61aa9232: Layer already exists
+69df91f8bf85: Layer already exists
+8d441cbfbc35: Layer already exists
+49dd736005c7: Layer already exists
+b31489489aea: Layer already exists
+135aac4d5c9a: Layer already exists
+daf557c4f08e: Layer already exists
+9341e123e5b0: Pushed
+15d52b142199: Pushed
+25d0a0a: digest: sha256:0788613bda6c40555a022b04cbd0872da96b39561f5aa976ff958d544be7a1ef size: 2417
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+9341e123e5b0: Preparing
+15d52b142199: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+49dd736005c7: Waiting
+8d441cbfbc35: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+b31489489aea: Waiting
+69df91f8bf85: Layer already exists
+9341e123e5b0: Layer already exists
+d03f61aa9232: Layer already exists
+ce15a1e93369: Layer already exists
+15d52b142199: Layer already exists
+b31489489aea: Layer already exists
+daf557c4f08e: Layer already exists
+8d441cbfbc35: Layer already exists
+49dd736005c7: Layer already exists
+135aac4d5c9a: Layer already exists
+latest: digest: sha256:0788613bda6c40555a022b04cbd0872da96b39561f5aa976ff958d544be7a1ef size: 2417
+
+[2025-09-30 04:13:02+0000] === Preparing runtime configuration ===
+
+[2025-09-30 04:13:02+0000] === Deploying to Cloud Run ===
+Deploying container to Cloud Run service [[1mzissou[m] in project [[1mzissou-471603[m] region [[1mus-central1[m]
+Deploying...
+Setting IAM Policy.............done
+Creating Revision............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................done
+Routing traffic.....done
+Done.
+Service [[1mzissou[m] revision [[1mzissou-zissou-25d0a0a-20250930041253[m] has been deployed and is serving [1m100[m percent of traffic.
+Service URL: [1mhttps://zissou-498379484787.us-central1.run.app[m
+
+[2025-09-30 04:14:28+0000] === Configuring health checks ===
+ERROR: (gcloud.run.services.update) unrecognized arguments:
+  --liveness-probe-request-path=/health (did you mean '--liveness-probe'?)
+  --liveness-probe-initial-delay-seconds=30
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS
+
+[2025-09-30 04:33:33+0000] === Initializing deploy ===
+[2025-09-30 04:33:33+0000] Loading environment variables from .env
+
+[2025-09-30 04:33:34+0000] === Pre-flight checks ===
+[2025-09-30 04:33:35+0000] Authenticating Docker client for us-central1-docker.pkg.dev
+WARNING: Your config file at [/home/mhaw/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "us-central1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: us-central1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+
+[2025-09-30 04:33:36+0000] === Building container image ===
+[2025-09-30 04:33:36+0000] Building image us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:df3b492
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.08kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.3s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 289B done
+#3 DONE 0.0s
+
+#4 [builder 1/6] FROM docker.io/library/python:3.11-slim@sha256:a0939570b38cddeb861b8e75d20b1c8218b21562b18f301171904b544e8cf228
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 15.79MB 0.3s done
+#5 DONE 0.3s
+
+#6 [builder 2/6] WORKDIR /app
+#6 CACHED
+
+#7 [runtime 4/7] COPY --from=builder /opt/venv /opt/venv
+#7 CACHED
+
+#8 [runtime 3/7] WORKDIR /app
+#8 CACHED
+
+#9 [builder 5/6] COPY requirements.txt .
+#9 CACHED
+
+#10 [builder 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [runtime 2/7] RUN groupadd -r zissou && useradd -r -g zissou zissou
+#11 CACHED
+
+#12 [builder 3/6] RUN apt-get update && apt-get install -y build-essential
+#12 CACHED
+
+#13 [builder 4/6] RUN python -m venv /opt/venv
+#13 CACHED
+
+#14 [runtime 5/7] RUN apt-get update && apt-get install -y ffmpeg
+#14 CACHED
+
+#15 [runtime 6/7] COPY --chown=zissou:zissou . .
+#15 DONE 0.5s
+
+#16 [runtime 7/7] COPY run.sh .
+#16 DONE 0.0s
+
+#17 exporting to image
+#17 exporting layers
+#17 exporting layers 0.7s done
+#17 writing image sha256:3fbbca11b553dfe5328c5c46afe7b97448ec35680abcdb264791d557ab2639a4 done
+#17 naming to us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou:df3b492 done
+#17 DONE 0.7s
+[2025-09-30 04:33:38+0000] Pushing image tags
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+30c7cd81ecc3: Preparing
+f2a4176d47e3: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+b31489489aea: Waiting
+d03f61aa9232: Layer already exists
+ce15a1e93369: Layer already exists
+69df91f8bf85: Layer already exists
+49dd736005c7: Layer already exists
+b31489489aea: Layer already exists
+8d441cbfbc35: Layer already exists
+135aac4d5c9a: Layer already exists
+daf557c4f08e: Layer already exists
+30c7cd81ecc3: Pushed
+f2a4176d47e3: Pushed
+df3b492: digest: sha256:37c072207977261781c15fae2570af44a78524af03b81e794178c3510dc0d062 size: 2417
+The push refers to repository [us-central1-docker.pkg.dev/zissou-471603/zissou-repo/zissou]
+30c7cd81ecc3: Preparing
+f2a4176d47e3: Preparing
+69df91f8bf85: Preparing
+d03f61aa9232: Preparing
+ce15a1e93369: Preparing
+b31489489aea: Preparing
+8d441cbfbc35: Preparing
+49dd736005c7: Preparing
+135aac4d5c9a: Preparing
+daf557c4f08e: Preparing
+8d441cbfbc35: Waiting
+49dd736005c7: Waiting
+135aac4d5c9a: Waiting
+daf557c4f08e: Waiting
+b31489489aea: Waiting
+d03f61aa9232: Layer already exists
+69df91f8bf85: Layer already exists
+30c7cd81ecc3: Layer already exists
+ce15a1e93369: Layer already exists
+f2a4176d47e3: Layer already exists
+b31489489aea: Layer already exists
+49dd736005c7: Layer already exists
+8d441cbfbc35: Layer already exists
+135aac4d5c9a: Layer already exists
+daf557c4f08e: Layer already exists
+latest: digest: sha256:37c072207977261781c15fae2570af44a78524af03b81e794178c3510dc0d062 size: 2417
+
+[2025-09-30 04:33:46+0000] === Preparing runtime configuration ===
+
+[2025-09-30 04:33:46+0000] === Deploying to Cloud Run ===
+Deploying container to Cloud Run service [[1mzissou[m] in project [[1mzissou-471603[m] region [[1mus-central1[m]
+Deploying...
+Setting IAM Policy............done
+Creating Revision......................................................................................done
+Routing traffic.....done
+Done.
+Service [[1mzissou[m] revision [[1mzissou-zissou-df3b492[m] has been deployed and is serving [1m100[m percent of traffic.
+Service URL: [1mhttps://zissou-498379484787.us-central1.run.app[m
+
+[2025-09-30 04:33:57+0000] === Configuring health checks ===
+ERROR: (gcloud.run.services.update) unrecognized arguments:
+  --liveness-probe-request-path=/health (did you mean '--liveness-probe'?)
+  --liveness-probe-initial-delay-seconds=30
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS

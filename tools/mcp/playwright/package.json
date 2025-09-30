@@ -1,0 +1,19 @@
+{
+  "name": "zissou-playwright-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server that drives Playwright for the Zissou project.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "install:browsers": "playwright install chromium",
+    "test": "node --check server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.2.2",
+    "playwright": "^1.45.0"
+  }
+}

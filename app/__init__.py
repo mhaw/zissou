@@ -83,6 +83,9 @@ def create_app():
     #     )
 
     app = Flask(__name__, instance_relative_config=True)
+    # Wrap with whitenoise for static file serving
+    from whitenoise import WhiteNoise
+    app.wsgi_app = WhiteNoise(app.wsgi_app, root='app/static/', prefix='/static')
 
     # Instrument the Flask app
     # if os.getenv("ENV") == "production":
@@ -300,6 +303,8 @@ def create_app():
     from flask import render_template
 
     def internal_server_error(e):
+        logger = logging.getLogger(__name__)
+        logger.error("An internal server error occurred", exc_info=True)
         # Note: we set the status code explicitly
         return render_template("500.html", error_message=str(e)), 500
 

@@ -96,16 +96,32 @@ const sendIdTokenToServer = async (idToken) => {
   const response = await fetch(sessionLoginEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, rememberMe: true }),
+    credentials: "include",
+    redirect: "follow",
+    body: JSON.stringify({ idToken, rememberMe: true, next: nextPath }),
   });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.message || "Server rejected login request");
+  if (response.redirected) {
+    window.location.assign(response.url || nextPath || "/");
+    return;
   }
-  const data = await response.json();
-  const destination = data.is_new_user ? "/profile" : nextPath || "/";
-  window.location.assign(destination);
+
+  if (response.ok) {
+    window.location.assign(nextPath || "/");
+    return;
+  }
+
+  let message = "Server rejected login request";
+  try {
+    const errorData = await response.json();
+    if (errorData?.error) {
+      message = errorData.error;
+    }
+  } catch (error) {
+    console.error("Failed to parse login error response", error);
+  }
+
+  throw new Error(message);
 };
 
 if (googleSignInButton) {

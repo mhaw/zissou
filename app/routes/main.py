@@ -438,11 +438,13 @@ def import_readwise():
 
 
 @bp.route("/progress/<task_id>")
+@auth_required
 def progress_page(task_id):
     return render_template("progress.html", task_id=task_id)
 
 
 @bp.route("/status/<task_id>")
+@auth_required
 def get_task_status(task_id):
     try:
         task = tasks_service.get_task(task_id)
@@ -715,6 +717,7 @@ def archive_item(item_id):
 
 
 @bp.route("/buckets/<bucket_id>/items")
+@auth_required
 @cache.cached(query_string=True, unless=_should_skip_cache)
 def bucket_items(bucket_id):
     bucket = buckets_service.get_bucket(bucket_id)
@@ -755,6 +758,7 @@ def bucket_items(bucket_id):
 
 
 @bp.route("/buckets", methods=("GET", "POST"))
+@auth_required
 def list_buckets():
     if request.method == "POST":
         name = request.form["name"]
@@ -802,6 +806,7 @@ def health_check():
 
 
 @bp.route("/archived")
+@auth_required
 def archived_items():
     """Lists all archived items."""
     params = _parse_list_params()

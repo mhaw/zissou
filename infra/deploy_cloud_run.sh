@@ -167,8 +167,8 @@ ENV_FILE=$(/usr/bin/mktemp -t zissou-prod-env.XXXX.yaml)
 : "${FIREBASE_PROJECT_ID:=}"
 : "${FIREBASE_WEB_API_KEY:=}"
 : "${FIREBASE_AUTH_DOMAIN:=}"
-: "${SESSION_COOKIE_SECURE:=true}"
-: "${SESSION_COOKIE_NAME:=__zissou_session}"
+: "${FLASK_SESSION_COOKIE_SECURE:=${SESSION_COOKIE_SECURE:-true}}"
+: "${FLASK_SESSION_COOKIE_NAME:=${SESSION_COOKIE_NAME:-flask_session}}"
 
 write_env_entry() {
     local key=$1
@@ -193,8 +193,8 @@ write_env_entry "AUTH_ENABLED" "$AUTH_ENABLED"
 write_env_entry "FIREBASE_PROJECT_ID" "$FIREBASE_PROJECT_ID"
 write_env_entry "FIREBASE_WEB_API_KEY" "$FIREBASE_WEB_API_KEY"
 write_env_entry "FIREBASE_AUTH_DOMAIN" "$FIREBASE_AUTH_DOMAIN"
-write_env_entry "SESSION_COOKIE_SECURE" "$SESSION_COOKIE_SECURE"
-write_env_entry "SESSION_COOKIE_NAME" "$SESSION_COOKIE_NAME"
+write_env_entry "FLASK_SESSION_COOKIE_SECURE" "$FLASK_SESSION_COOKIE_SECURE"
+write_env_entry "FLASK_SESSION_COOKIE_NAME" "$FLASK_SESSION_COOKIE_NAME"
 
 section "Deploying to Cloud Run"
 DEPLOY_CMD=(
