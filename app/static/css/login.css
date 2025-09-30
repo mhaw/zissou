@@ -1,0 +1,156 @@
+:root {
+  --brand-color: #4285f4;
+  --brand-color-hover: #357ae8;
+  --text-color: #333;
+  --text-color-light: #666;
+  --border-color: #ccc;
+  --error-color: #c62828;
+  --success-color: #2e7d32;
+  --bg-color: #f7f7f7;
+  --surface-color: #fff;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  background: var(--bg-color);
+  display: grid;
+  place-content: center;
+  min-height: 100vh;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+.container {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  text-align: center;
+  background: var(--surface-color);
+  padding: 2.5rem 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  margin-top: 0;
+  color: var(--text-color);
+}
+
+p {
+  color: var(--text-color-light);
+}
+
+.form-group {
+  margin-bottom: 1.25rem;
+  text-align: left;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+input[type="email"],
+input[type="password"],
+input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+input:focus {
+  border-color: var(--brand-color);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2);
+}
+
+.btn {
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.btn:disabled {
+  background: #9bbcff;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--brand-color);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-color-hover);
+}
+
+.btn-secondary {
+  background: var(--surface-color);
+  color: var(--text-color);
+  border-color: var(--border-color);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f2f2f2;
+}
+
+.separator {
+  font-size: 0.8rem;
+  color: #999;
+  margin: 1.5rem 0;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.separator::before,
+.separator::after {
+  content: "";
+  height: 1px;
+  background: #e0e0e0;
+  flex-grow: 1;
+}
+
+.feedback {
+  margin-top: 1rem;
+  font-weight: 500;
+}
+
+.error {
+  color: var(--error-color);
+}
+
+.success {
+  color: var(--success-color);
+}
+
+.subtle-link {
+  color: var(--brand-color);
+  text-decoration: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.subtle-link:hover {
+  text-decoration: underline;
+}
+
+.hidden {
+  display: none;
+}

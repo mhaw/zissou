@@ -33,7 +33,7 @@ bp = auth_bp
 
 @auth_bp.before_app_request
 def refresh_session_cookie():
-    """Proactively refresh the session cookie if it is close to expiring."""
+    """Warn when a cookie is about to expire so clients can reauthenticate."""
     user_ctx = getattr(g, "user", None)
     if user_ctx and request.endpoint not in ["static", "auth.logout"]:
         claims = g.get("claims")
@@ -43,22 +43,10 @@ def refresh_session_cookie():
             threshold = timedelta(hours=24)
 
             if expiry_time - now < threshold:
-                try:
-                    new_session_cookie = firebase_auth.create_session_cookie(
-                        claims["sub"], expires_in=timedelta(days=5)
-                    )
-                    response = make_response(redirect(request.url))
-                    response.set_cookie(
-                        current_app.config["SESSION_COOKIE_NAME"],
-                        new_session_cookie,
-                        httponly=True,
-                        secure=current_app.config["SESSION_COOKIE_SECURE"],
-                        samesite="None",
-                        path="/",
-                    )
-                    return response
-                except Exception as e:
-                    logger.warning(f"Failed to refresh session cookie: {e}")
+                logger.debug(
+                    "Session cookie approaching expiry for %s; prompting client refresh.",
+                    user_ctx.get("uid"),
+                )
 
 
 @auth_bp.before_app_request

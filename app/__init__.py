@@ -160,7 +160,25 @@ def create_app():
 
     from flask_talisman import Talisman
 
-    Talisman(app)
+    content_security_policy = {
+        "default-src": ["'self'"],
+        "script-src": [
+            "'self'",
+            "https://www.gstatic.com",
+            "https://www.googleapis.com",
+        ],
+        "connect-src": [
+            "'self'",
+            "https://www.googleapis.com",
+            "https://identitytoolkit.googleapis.com",
+            "https://securetoken.googleapis.com",
+        ],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:"],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
+    }
+
+    Talisman(app, content_security_policy=content_security_policy)
 
     cache.init_app(app)
 

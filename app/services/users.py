@@ -176,7 +176,9 @@ def delete_user(user_id: str):
         logger.info(f"Deleted user {user_id} from Firebase Authentication.")
 
         # Enqueue a task to delete all items associated with this user
-        from app.services import tasks as tasks_service  # Local import to avoid circular deps
+        from app.services import (
+            tasks as tasks_service,
+        )  # Local import to avoid circular deps
 
         tasks_service.create_delete_user_items_task(user_id)
         logger.info(f"Enqueued item deletion task for user {user_id}.")
