@@ -197,10 +197,15 @@ def create_app():
 
     content_security_policy = {
         "default-src": ["'self'"],
-        "script-src": ["'self'"],
-        "connect-src": ["'self'"],
+        "script-src": ["'self'", "https://www.gstatic.com"],
+        "connect-src": [
+            "'self'",
+            f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}",
+            "https://www.googleapis.com",
+        ],
         "style-src": ["'self'"],
         "img-src": ["'self'", "data:"],
+        "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
     }
 
     Talisman(app, content_security_policy=content_security_policy)
