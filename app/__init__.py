@@ -197,13 +197,14 @@ def create_app():
 
     content_security_policy = {
         "default-src": ["'self'"],
-        "script-src": ["'self'", "https://www.gstatic.com"],
+        "script-src": ["'self'", "https://www.gstatic.com", "https://apis.google.com"],
         "connect-src": [
             "'self'",
             f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}",
             "https://www.googleapis.com",
             "https://www.gstatic.com",
             "https://securetoken.googleapis.com",
+            "https://identitytoolkit.googleapis.com",
         ],
         "style-src": ["'self'"],
         "img-src": ["'self'", "data:"],
