@@ -204,16 +204,9 @@ def create_app():
             "https://unpkg.com",
             "'sha256-4xguqqQk2iq3wwW4k9E7b2FwK/TcwQCLpqrs0V6zgr4='",
             "'sha256-sYAX3BE93rdyoUMKhTx0997VqmBWqrC4mC0JKnOQDHM='",
+            "'sha256-OT4UeTJFsHVAg+DZ4Pq18PwwjDewDQWs9AmwzjWTH2c='",
         ],
-        "connect-src": [
-            "'self'",
-            f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}",
-            "https://www.googleapis.com",
-            "https://www.gstatic.com",
-            "https://securetoken.googleapis.com",
-            "https://identitytoolkit.googleapis.com",
-        ],
-        "style-src": ["'self'"],
+        "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='"],
         "img-src": ["'self'", "data:"],
         "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
     }
