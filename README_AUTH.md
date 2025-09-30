@@ -12,9 +12,11 @@ This document captures the narrow set of changes required to enable Google-only 
 To ensure the security of the application, a Content Security Policy is enforced using Flask-Talisman. This policy helps mitigate Cross-Site Scripting (XSS) attacks by specifying which sources of content are allowed to be loaded and executed by the browser.
 
 **Key Directives for Firebase Authentication:**
-- `script-src`: Allows scripts from `'self'`, `https://www.gstatic.com` (for Firebase SDK), `https://apis.google.com`, and `https://unpkg.com`. Inline scripts are permitted via dynamically generated nonces.
-- `connect-src`: Allows connections to `'self'`, `https://securetoken.googleapis.com`, and `https://identitytoolkit.googleapis.com` for Firebase authentication processes.
-- `report-uri`: CSP violations are reported to `/csp-violation-report` for monitoring and debugging.
+- `script-src`: Allows scripts from `'self'`, `https://www.gstatic.com` (Firebase JS SDK), `https://apis.google.com` (federated auth iframe), and `https://unpkg.com` (htmx CDN). Inline scripts are permitted via dynamically generated nonces.
+- `connect-src`: Allows connections to `'self'`, `https://securetoken.googleapis.com`, `https://identitytoolkit.googleapis.com`, `https://www.googleapis.com`, and `https://firebaseinstallations.googleapis.com`. Add more origins (e.g., Firestore REST) via `CSP_ADDITIONAL_CONNECT_SRC` if needed.
+- `frame-src`: Limited to `'self'`, `https://apis.google.com`, and your configured `FIREBASE_AUTH_DOMAIN` to enable the Google sign-in bridge.
+- `report-uri`: Set through `CSP_REPORT_URI`; when present, violations are forwarded externally instead of the legacy `/csp-violation-report` endpoint.
+- `Report-To`: Controlled by `CSP_REPORT_TO` and `CSP_REPORT_TO_ENDPOINT` to surface structured violation reports (defaults to the same endpoint as `CSP_REPORT_URI`).
 
 **Nonce Implementation:**
 Inline `<script>` tags are secured using nonces. Flask-Talisman automatically generates a unique nonce for each request and injects it into the `script-src` header. All inline scripts in the templates must include `nonce="{{ csp_nonce() }}"` to be executed.
@@ -47,6 +49,12 @@ The Firebase session cookie (`fb_session`) is always issued with the `Secure`, `
    - `FLASK_SESSION_COOKIE_NAME=flask_session`
    - `FLASK_SESSION_COOKIE_SECURE=true`
    - `AUTH_ENABLED=true`
+    - Optional CSP hardening:
+      - `CSP_REPORT_URI=https://csp-reporting.example.com/collect`
+      - `CSP_REPORT_TO_ENDPOINT=https://csp-reporting.example.com/collect`
+      - `CSP_ADDITIONAL_CONNECT_SRC="https://firestore.googleapis.com"`
+      - `CSP_ADDITIONAL_SCRIPT_SRC="https://www.googletagmanager.com"`
+      - `CSP_ADDITIONAL_STYLE_SRC="https://fonts.googleapis.com"`
 3. Keep the Cloud Run ingress open to unauthenticated traffic; enforcement happens in-app.
 4. Deploy as usual (`./infra/deploy_cloud_run.sh`).
 

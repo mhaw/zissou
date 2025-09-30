@@ -11,6 +11,10 @@ Dockerfile
 .pytest_cache
 .mypy_cache
 .ruff_cache
+node_modules
+.coverage
+coverage.xml
+instance
 __pycache__
 *.pyc
 *.pyo

@@ -1,9 +1,10 @@
+import json
 import os
 import logging
 
 import firebase_admin  # type: ignore[import-untyped]
 from dotenv import load_dotenv
-from flask import Flask, g, request, redirect
+from flask import Flask, g, request, redirect, send_from_directory
 
 from app.extensions import cache, limiter
 from app.utils.logging_config import setup_logging
@@ -54,6 +55,17 @@ def _validate_environment():
         message = f"Missing required environment variables: {', '.join(missing_vars)}"
         logger.critical(message)
         raise RuntimeError(message)
+
+
+def _parse_csp_values(raw_value: str | None) -> list[str]:
+    """Split comma/space separated CSP env overrides into a clean list."""
+    if not raw_value:
+        return []
+    return [
+        fragment.strip()
+        for fragment in raw_value.replace(",", " ").split()
+        if fragment.strip()
+    ]
 
 
 def create_app():
@@ -195,51 +207,89 @@ def create_app():
 
     from flask_talisman import Talisman
 
+    firebase_auth_domain = app.config.get("FIREBASE_AUTH_DOMAIN") or ""
+    additional_connect_src = _parse_csp_values(
+        os.getenv("CSP_ADDITIONAL_CONNECT_SRC")
+    )
+    additional_script_src = _parse_csp_values(
+        os.getenv("CSP_ADDITIONAL_SCRIPT_SRC")
+    )
+    additional_style_src = _parse_csp_values(
+        os.getenv("CSP_ADDITIONAL_STYLE_SRC")
+    )
+
+    connect_sources = [
+        "'self'",
+        "https://securetoken.googleapis.com",
+        "https://identitytoolkit.googleapis.com",
+        "https://www.googleapis.com",
+        "https://firebaseinstallations.googleapis.com",
+    ]
+    for source in additional_connect_src:
+        if source not in connect_sources:
+            connect_sources.append(source)
+
+    script_sources = [
+        "'self'",
+        "https://www.gstatic.com",
+        "https://apis.google.com",
+        "https://unpkg.com",
+    ]
+    for source in additional_script_src:
+        if source not in script_sources:
+            script_sources.append(source)
+
+    style_sources = ["'self'", "data:"]
+    for source in additional_style_src:
+        if source not in style_sources:
+            style_sources.append(source)
+
+    report_uri = os.getenv("CSP_REPORT_URI")
+    report_to_group = os.getenv("CSP_REPORT_TO", "default-csp-endpoint")
+    report_to_endpoint = os.getenv("CSP_REPORT_TO_ENDPOINT") or report_uri
+
     content_security_policy = {
         "default-src": ["'self'"],
-        "script-src": [
-            "'self'",
-            "https://www.gstatic.com",
-            "https://apis.google.com",
-            "https://unpkg.com",
-            "'sha256-4xguqqQk2iq3wwW4k9E7b2FwK/TcwQCLpqrs0V6zgr4='",
-            "'sha256-sYAX3BE93rdyoUMKhTx0997VqmBWqrC4mC0JKnOQDHM='",
-            "'sha256-OT4UeTJFsHVAg+DZ4Pq18PwwjDewDQWs9AmwzjWTH2c='",
-        ],
-        "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='", "data:"],
+        "connect-src": connect_sources,
+        "script-src": script_sources,
+        "style-src": style_sources,
         "img-src": ["'self'", "data:"],
-        "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
-        "connect-src": [
-            "'self'",
-            "https://securetoken.googleapis.com",
-            "https://identitytoolkit.googleapis.com",
-        ],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
+        "frame-src": ["'self'", "https://apis.google.com"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
     }
+
+    if firebase_auth_domain:
+        iframe_origin = f"https://{firebase_auth_domain}"
+        if iframe_origin not in content_security_policy["frame-src"]:
+            content_security_policy["frame-src"].append(iframe_origin)
+
+    if report_uri:
+        content_security_policy["report-uri"] = report_uri
+
+    report_to_header: str | None = None
+    if report_to_endpoint:
+        report_to_header = json.dumps(
+            {
+                "group": report_to_group,
+                "max_age": 60 * 60 * 24 * 30,
+                "endpoints": [{"url": report_to_endpoint}],
+            }
+        )
 
     Talisman(
         app,
         content_security_policy=content_security_policy,
-        content_security_policy_nonce_in=["script-src"],
+        content_security_policy_nonce_in=["script-src", "style-src"],
     )
 
-    content_security_policy = {
-        "default-src": ["'self'"],
-        "script-src": [
-            "'self'",
-            "https://www.gstatic.com",
-            "https://apis.google.com",
-            "https://unpkg.com",
-        ],
-        "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='", "data:"],
-        "img-src": ["'self'", "data:"],
-        "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
-        "connect-src": [
-            "'self'",
-            "https://securetoken.googleapis.com",
-            "https://identitytoolkit.googleapis.com",
-        ],
-        "report-uri": "/csp-violation-report",
-    }
+    if report_to_header:
+
+        @app.after_request
+        def add_report_to_header(response):
+            response.headers.setdefault("Report-To", report_to_header)
+            return response
 
     cache.init_app(app)
 
@@ -300,6 +350,19 @@ def create_app():
 
             redirect_url = f"https://{canonical_host}{target_path}"
             return redirect(redirect_url, code=301)
+
+    @app.route("/favicon.ico")
+    def favicon():
+        static_dir = os.path.join(app.root_path, "static", "img")
+        try:
+            return send_from_directory(
+                static_dir,
+                "zissou_favicon.png",
+                mimetype="image/png",
+                max_age=60 * 60 * 24 * 30,
+            )
+        except FileNotFoundError:
+            return ("", 204)
 
     @app.route("/wp-admin/<path:_>")
     @app.route("/wordpress/<path:_>")
