@@ -153,7 +153,7 @@ section "Building container image"
 export DOCKER_BUILDKIT=${DOCKER_BUILDKIT:-1}
 export BUILDKIT_PROGRESS=${BUILDKIT_PROGRESS:-plain}
 log "Building image $IMAGE_TAG"
-docker build --platform linux/amd64 -t "$IMAGE_TAG" .
+docker build --platform linux/amd64 --no-cache -t "$IMAGE_TAG" .
 docker tag "$IMAGE_TAG" "$LATEST_TAG"
 
 log "Pushing image tags"
@@ -228,8 +228,7 @@ section "Configuring health checks"
 gcloud run services update "$SERVICE_NAME" \
     --project="$GCP_PROJECT_ID" \
     --region="$GCP_REGION" \
-    --liveness-probe-request-path=/health \
-    --liveness-probe-initial-delay-seconds=30 \
+    --liveness-probe=request-path=/health,initial-delay=30 \
     --quiet
 
 section "Post-deploy steps"
