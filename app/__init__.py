@@ -194,20 +194,10 @@ def create_app():
 
     content_security_policy = {
         "default-src": ["'self'"],
-        "script-src": [
-            "'self'",
-            "https://www.gstatic.com",
-            "https://www.googleapis.com",
-        ],
-        "connect-src": [
-            "'self'",
-            "https://www.googleapis.com",
-            "https://identitytoolkit.googleapis.com",
-            "https://securetoken.googleapis.com",
-        ],
-        "style-src": ["'self'", "'unsafe-inline'"],
+        "script-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "style-src": ["'self'"],
         "img-src": ["'self'", "data:"],
-        "font-src": ["'self'", "https://fonts.gstatic.com"],
     }
 
     Talisman(app, content_security_policy=content_security_policy)
@@ -242,7 +232,7 @@ def create_app():
     def attach_authenticated_user():
         """Attach the authenticated user to the request context."""
         g.user = None
-        if request.path.startswith(('/static/', '/auth/')):
+        if request.path.startswith(('/static/', '/auth/', '/favicon.ico', '/robots.txt')):
             return
 
         if not app.config.get("AUTH_ENABLED", False):

@@ -1,0 +1,15 @@
+{
+  "name": "zissou",
+  "version": "1.0.0",
+  "description": "Zissou audio conversion",
+  "main": "index.js",
+  "scripts": {
+    "build:css": "tailwindcss -i app/static/css/src/styles.css -o app/static/css/styles.css"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "tailwindcss": "^3.4.1"
+  }
+}

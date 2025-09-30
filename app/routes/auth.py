@@ -142,7 +142,7 @@ def session_login():
         max_age=int(expires_in.total_seconds()),
         secure=True,
         httponly=True,
-        samesite="Lax",
+        samesite="None",
         path="/",
     )
 
@@ -216,7 +216,7 @@ def logout():
         expires=0,
         secure=True,
         httponly=True,
-        samesite="Lax",
+        samesite="None",
         path="/",
     )
 
