@@ -206,7 +206,7 @@ def create_app():
             "'sha256-sYAX3BE93rdyoUMKhTx0997VqmBWqrC4mC0JKnOQDHM='",
             "'sha256-OT4UeTJFsHVAg+DZ4Pq18PwwjDewDQWs9AmwzjWTH2c='",
         ],
-        "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='"],
+        "style-src": ["'self'", "'sha256-pgn1TCGZX6O77zDvy0oTODMOxemn0oj0LeCnQTRj7Kg='", "data:"],
         "img-src": ["'self'", "data:"],
         "frame-src": [f"https://{app.config.get('FIREBASE_AUTH_DOMAIN')}"],
     }
