@@ -137,11 +137,20 @@ def token():
 
 
 @auth_bp.post("/logout")
-@csrf.protect
 def logout():
     """Logs the user out."""
+    session.clear()
+    flash("You have been signed out.", "info")
+    return redirect(url_for("auth.login"))
+
+
+@auth_bp.post("/logout_post")
+@csrf.protect
+def logout_post():
+    """Handles the actual logout logic, including revoking tokens and clearing cookies."""
     user = g.user
     if not user:
+        # If user is not in g.user, try to get it from the cookie (legacy session)
         cookie = request.cookies.get(FB_COOKIE)
         if cookie:
             try:
@@ -151,7 +160,7 @@ def logout():
                 g.user = user
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.info(
-                    "Session cookie unavailable during logout",
+                    "Session cookie unavailable during logout_post",
                     extra={
                         "auth_event": "logout_cookie_missing",
                         "reason": str(exc),
@@ -199,5 +208,4 @@ def logout():
             },
         )
 
-    flash("You have been signed out.", "info")
     return response

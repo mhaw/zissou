@@ -91,7 +91,7 @@
         if (logoutButton) {
             logoutButton.addEventListener('click', function() {
                 const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-                fetch('{{ url_for("auth.logout") }}', {
+                fetch('{{ url_for("auth.logout_post") }}', {
                     method: 'POST',
                     headers: {
                         'X-CSRF-Token': csrfToken,
