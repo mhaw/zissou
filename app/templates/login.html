@@ -9,7 +9,7 @@
   <body
     data-firebase-config='{{ firebase_config | tojson | e }}'
     data-next-path="{{ next_path }}"
-    data-session-login-url="{{ url_for('auth.session_login') }}"
+    data-session-login-url="{{ url_for('auth.token') }}"
   >
     <div class="container">
       <div id="auth-container">

@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Improved Error Handling in UI**: The item detail page now displays a user-friendly error message if the article processing has failed.
 
 ### Changed
-- **Authentication**: The authentication flow now creates a user profile in Firestore when a new user signs in. The user's default voice is stored in their profile.
+- **Authentication**: Default authentication now relies on Google Identity-Aware Proxy (IAP); the Flask app reads trusted headers instead of minting Firebase session cookies. `AUTH_BACKEND=firebase` remains available as an opt-in fallback.
 
 
 

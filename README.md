@@ -139,18 +139,17 @@ When `AUTH_ENABLED=true`, Cloud Tasks must be able to mint OIDC tokens with the 
 
 ### Authentication
 
-Role-based access is controlled via the `ADMIN_EMAILS` environment variable. To grant admin privileges to specific users, set this variable to a comma-separated list of their email addresses in your `.env` file.
+Zissou defaults to `AUTH_BACKEND=iap`, which expects Google Identity-Aware Proxy to inject the `X-Goog-Authenticated-User-Email` header. Set `AUTH_ENABLED=true` in environments where IAP is active so every `@auth_required` route enforces the check. When developing locally without IAP, leave `AUTH_ENABLED=false` or send the headers manually while testing.
+
+Role-based access is controlled via the `ADMIN_EMAILS` environment variable. Provide a comma-separated list of Google account emails; anyone in the list becomes an admin once IAP authenticates the request.
 
 ```
+AUTH_BACKEND=iap
+AUTH_ENABLED=true
 ADMIN_EMAILS=user1@example.com,user2@example.com
 ```
 
-If `ADMIN_EMAILS` is not set, the application will grant admin rights to the first user who signs in. This is convenient for initial setup but should be configured for production environments.
-
-Session duration can be configured with the following variables:
-
-- `SESSION_COOKIE_LIFETIME_DAYS`: The default session lifetime in days (default: `5`).
-- `SESSION_COOKIE_LIFETIME_REMEMBER_ME_DAYS`: The session lifetime in days when "Remember Me" is checked (default: `30`).
+To fall back to Firebase Authentication, change `AUTH_BACKEND` to `firebase` and populate the Firebase-specific environment variables listed in `.env.example`. The legacy login UI and session-cookie flow remain available for that mode but are no longer recommended.
 
 ### How to Configure Voices
 

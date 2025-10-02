@@ -25,6 +25,7 @@ def _validate_environment():
         "GCP_PROJECT_ID",
         "GCS_BUCKET",
     ]
+    auth_backend = (os.getenv("AUTH_BACKEND") or "iap").strip().lower()
     # FLASK_SECRET_KEY is also checked below, but we include it here for a clearer error message.
     if not os.getenv("FLASK_SECRET_KEY") and not os.getenv("SECRET_KEY"):
         required_vars.append("FLASK_SECRET_KEY")
@@ -40,8 +41,8 @@ def _validate_environment():
             ]
         )
 
-    # If auth is enabled, Firebase variables are required.
-    if os.getenv("AUTH_ENABLED", "false").lower() == "true":
+    # If the Firebase backend is active, make sure all client configuration exists.
+    if auth_backend == "firebase" and os.getenv("AUTH_ENABLED", "false").lower() == "true":
         required_vars.extend(
             [
                 "FIREBASE_PROJECT_ID",
@@ -83,6 +84,7 @@ def create_app():
     logger.info(f"  GCP_PROJECT_ID: {os.getenv('GCP_PROJECT_ID')}")
     logger.info(f"  GCS_BUCKET: {os.getenv('GCS_BUCKET')}")
     logger.info(f"  AUTH_ENABLED: {os.getenv('AUTH_ENABLED')}")
+    logger.info(f"  AUTH_BACKEND: {os.getenv('AUTH_BACKEND', 'iap')}")
     logger.info(f"  CACHE_TYPE: {os.getenv('CACHE_TYPE')}")
     logger.info(f"  RATELIMIT_STORAGE_URI: {os.getenv('RATELIMIT_STORAGE_URI')}")
 
@@ -121,8 +123,14 @@ def create_app():
     secret_key = os.getenv("FLASK_SECRET_KEY") or os.getenv("SECRET_KEY") or "dev"
     env_name = os.getenv("ENV", "").strip().lower()
     is_development = env_name == "development"
-    auth_enabled = os.getenv("AUTH_ENABLED", "false").lower() == "true"
-    flask_session_name = os.getenv("FLASK_SESSION_COOKIE_NAME", "flask_session")
+    auth_backend = (os.getenv("AUTH_BACKEND") or "iap").strip().lower()
+    if auth_backend not in {"firebase", "iap"}:
+        logger.warning("Unknown AUTH_BACKEND %s; defaulting to 'iap'.", auth_backend)
+        auth_backend = "iap"
+    auth_enabled_raw = os.getenv("AUTH_ENABLED")
+    auth_enabled = False
+    if isinstance(auth_enabled_raw, str):
+        auth_enabled = auth_enabled_raw.strip().lower() == "true"
     flask_session_secure_env = os.getenv("FLASK_SESSION_COOKIE_SECURE")
     if flask_session_secure_env is not None:
         flask_session_secure = flask_session_secure_env.strip().lower() == "true"
@@ -133,7 +141,14 @@ def create_app():
             "FLASK_SESSION_COOKIE_SECURE is disabled outside development; browsers may drop session cookies."
         )
 
-    firebase_project_id = os.getenv("FIREBASE_PROJECT_ID")
+    firebase_project_id = None
+    firebase_web_api_key = None
+    firebase_auth_domain = None
+    if auth_backend == "firebase":
+        firebase_project_id = os.getenv("FIREBASE_PROJECT_ID")
+        firebase_web_api_key = os.getenv("FIREBASE_WEB_API_KEY")
+        firebase_auth_domain = os.getenv("FIREBASE_AUTH_DOMAIN")
+
     admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
     admin_emails = [
         email.strip().lower() for email in admin_emails_raw.split(",") if email.strip()
@@ -142,6 +157,7 @@ def create_app():
         os.getenv("CANONICAL_HOST") or os.getenv("CANON_DOMAIN") or ""
     ).strip()
     canonical_host = canonical_host.lower() or None
+
 
     # Determine storage URI for Flask-Limiter
     storage_uri = "memory://"
@@ -159,45 +175,46 @@ def create_app():
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         AUTH_ENABLED=auth_enabled,
+        AUTH_BACKEND=auth_backend,
         FIREBASE_PROJECT_ID=firebase_project_id,
-        FIREBASE_WEB_API_KEY=os.getenv("FIREBASE_WEB_API_KEY"),
-        FIREBASE_AUTH_DOMAIN=os.getenv("FIREBASE_AUTH_DOMAIN"),
+        FIREBASE_WEB_API_KEY=firebase_web_api_key,
+        FIREBASE_AUTH_DOMAIN=firebase_auth_domain,
         ADMIN_EMAILS=admin_emails,
         RATELIMIT_STORAGE_URI=storage_uri,
         CANONICAL_HOST=canonical_host,
         **cache_defaults,
     )
 
-    if auth_enabled and not firebase_project_id:
+    if auth_backend == "firebase" and auth_enabled and not firebase_project_id:
         raise RuntimeError("FIREBASE_PROJECT_ID must be set when AUTH_ENABLED is true")
 
     firebase_app = None
-    if firebase_project_id and not firebase_admin._apps:
+    if auth_backend == "firebase" and firebase_project_id and not firebase_admin._apps:
         firebase_admin.initialize_app()
 
-    if firebase_admin._apps:
+    if auth_backend == "firebase" and firebase_admin._apps:
         firebase_app = firebase_admin.get_app()
         logger.info(
             "Firebase Admin project_id: %s",
             getattr(firebase_app, "project_id", None),
         )
-    logger.info(
-        "Firebase client project_id (login page): %s",
-        firebase_project_id,
-    )
-    if (
-        firebase_app
-        and getattr(firebase_app, "project_id", None)
-        and firebase_project_id
-        and firebase_app.project_id != firebase_project_id
-    ):
-        logger.error(
-            "Firebase Admin project_id does not match client configuration",
-            extra={
-                "firebase_admin_project_id": firebase_app.project_id,
-                "firebase_client_project_id": firebase_project_id,
-            },
+        logger.info(
+            "Firebase client project_id (login page): %s",
+            firebase_project_id,
         )
+        if (
+            firebase_app
+            and getattr(firebase_app, "project_id", None)
+            and firebase_project_id
+            and firebase_app.project_id != firebase_project_id
+        ):
+            logger.error(
+                "Firebase Admin project_id does not match client configuration",
+                extra={
+                    "firebase_admin_project_id": firebase_app.project_id,
+                    "firebase_client_project_id": firebase_project_id,
+                },
+            )
 
     from app.extensions import csrf
 
@@ -314,12 +331,8 @@ def create_app():
         app.register_blueprint(auth.auth_bp)
         print("Registered auth blueprint")
 
-    from .routes import csp
-    if "csp" not in app.blueprints:
-        app.register_blueprint(csp.csp_bp)
-        print("Registered csp blueprint")
 
-    from app.auth import get_current_user_from_token, build_user_context
+    from app.auth import get_current_user
 
     @app.before_request
     def attach_authenticated_user():
@@ -331,7 +344,7 @@ def create_app():
         if not app.config.get("AUTH_ENABLED", False):
             return
 
-        g.user = get_current_user_from_token()
+        g.user = get_current_user()
 
     if canonical_host:
 

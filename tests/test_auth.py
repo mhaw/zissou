@@ -8,6 +8,7 @@ from app.models.item import Item
 
 def test_login_page_loads(client):
     """Tests that the login page loads correctly."""
+    client.application.config.update(AUTH_BACKEND="firebase")
     response = client.get("/auth/login")
     assert response.status_code == 200
     assert b"Sign in to Zissou" in response.data

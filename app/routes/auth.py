@@ -33,8 +33,14 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 bp = auth_bp
 
 
+def _require_firebase_backend():
+    if current_app.config.get("AUTH_BACKEND") != "firebase":
+        abort(404)
+
+
 @auth_bp.get("/login")
 def login():
+    _require_firebase_backend()
     next_path = request.args.get("next", "/")
 
     if not current_app.config.get("AUTH_ENABLED", False):
@@ -61,6 +67,7 @@ def login():
 @csrf.exempt
 @limiter.limit("20/minute")
 def token():
+    _require_firebase_backend()
     if not current_app.config.get("AUTH_ENABLED", False):
         return jsonify({"error": "auth disabled"}), 403
 
@@ -138,6 +145,7 @@ def token():
 
 @auth_bp.post("/logout")
 def logout():
+    _require_firebase_backend()
     """Logs the user out."""
     session.clear()
     flash("You have been signed out.", "info")
@@ -145,8 +153,8 @@ def logout():
 
 
 @auth_bp.post("/logout_post")
-@csrf.protect
 def logout_post():
+    _require_firebase_backend()
     """Handles the actual logout logic, including revoking tokens and clearing cookies."""
     user = g.user
     if not user:
