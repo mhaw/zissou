@@ -21,7 +21,7 @@ try {
 }
 
 const nextPath = nextPathRaw || "/";
-const sessionLoginEndpoint = sessionLoginUrl || "/auth/sessionLogin";
+const tokenEndpoint = "/auth/token";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -93,7 +93,7 @@ const setLoading = (isLoading) => {
 
 // --- Auth Logic ---
 const sendIdTokenToServer = async (idToken) => {
-  const response = await fetch(sessionLoginEndpoint, {
+  const response = await fetch(tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -101,12 +101,9 @@ const sendIdTokenToServer = async (idToken) => {
     body: JSON.stringify({ idToken, rememberMe: true, next: nextPath }),
   });
 
-  if (response.redirected) {
-    window.location.assign(response.url || nextPath || "/");
-    return;
-  }
-
   if (response.ok) {
+    const data = await response.json();
+    localStorage.setItem("token", data.token);
     window.location.assign(nextPath || "/");
     return;
   }
@@ -192,13 +189,10 @@ if (form) {
           case "auth/user-disabled":
             return "This account has been disabled. Contact support.";
           case "auth/user-not-found":
-            state = "sign-up";
-            render();
-            return "We could not find an account with that email. Create one below.";
           case "auth/wrong-password":
             state = "sign-in";
             render();
-            return "Incorrect password. Please try again.";
+            return "Invalid credentials. Please try again.";
           case "auth/email-already-in-use":
             state = "sign-in";
             render();

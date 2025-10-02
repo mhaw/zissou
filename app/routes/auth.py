@@ -24,15 +24,13 @@ from firebase_admin import auth as firebase_auth  # type: ignore[import-untyped]
 from app.constants import FB_COOKIE
 from app.extensions import csrf, limiter
 from app.services import users as users_service
+from app.auth import build_user_context
 
 logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 bp = auth_bp
-
-
-
 
 
 @auth_bp.get("/login")
@@ -59,38 +57,22 @@ def login():
     )
 
 
-@auth_bp.post("/sessionLogin")
+@auth_bp.post("/token")
 @csrf.exempt
 @limiter.limit("20/minute")
-def session_login():
+def token():
     if not current_app.config.get("AUTH_ENABLED", False):
         return jsonify({"error": "auth disabled"}), 403
 
-    session_lifetime_days = current_app.config.get("SESSION_COOKIE_LIFETIME_DAYS", 5)
     payload = request.get_json(silent=True) or request.form
     id_token = payload.get("idToken") if payload else None
-    remember_me = payload.get("rememberMe") if payload else False
-    next_url = payload.get("next") if payload else None
-    if not next_url:
-        next_url = request.args.get("next")
 
     if not id_token:
         return jsonify({"error": "missing idToken"}), 400
 
-    if remember_me:
-        session_lifetime_days = current_app.config.get(
-            "SESSION_COOKIE_LIFETIME_REMEMBER_ME_DAYS", 14
-        )
-
-    expires_in = timedelta(days=session_lifetime_days)
-
     try:
         # Verify the ID token while checking if the token is revoked.
         decoded_id_token = firebase_auth.verify_id_token(id_token, check_revoked=True)
-        # Create the session cookie.
-        session_cookie = firebase_auth.create_session_cookie(
-            id_token, expires_in=expires_in
-        )
     except firebase_auth.ExpiredIdTokenError:
         logger.warning(
             "Expired ID token on session login",
@@ -135,14 +117,6 @@ def session_login():
         logger.error(f"Failed to get or create user: {e}")
         return jsonify({"error": "internal server error"}), 500
 
-    response = make_response(redirect(next_url or url_for("main.index")))
-    response.set_cookie(
-        FB_COOKIE,
-        session_cookie,
-        samesite="Lax",
-        path="/",
-    )
-
     auth_method = decoded_id_token.get("firebase", {}).get(
         "sign_in_provider", "unknown"
     )
@@ -159,15 +133,13 @@ def session_login():
         },
     )
 
-    return response
+    return jsonify({"token": id_token})
 
 
 @auth_bp.post("/logout")
+@csrf.protect
 def logout():
-    # Basic protection to ensure the request is from an AJAX call
-    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
-        abort(403)
-
+    """Logs the user out."""
     user = g.user
     if not user:
         cookie = request.cookies.get(FB_COOKIE)

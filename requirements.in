@@ -11,8 +11,11 @@ newspaper3k
 beautifulsoup4
 readability-lxml
 python-dotenv
+Flask-Cors
+Flask-Limiter
 Flask-Talisman
 Flask-WTF
+structlog
 pydub
 python-json-logger
 python-dateutil

@@ -90,9 +90,11 @@
         const logoutButton = document.getElementById('logout-button');
         if (logoutButton) {
             logoutButton.addEventListener('click', function() {
+                const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
                 fetch('{{ url_for("auth.logout") }}', {
                     method: 'POST',
                     headers: {
+                        'X-CSRF-Token': csrfToken,
                         'X-Requested-With': 'XMLHttpRequest'
                     }
                 }).then(response => {

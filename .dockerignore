@@ -1,35 +1,12 @@
-# Git
+.dockerignore
+.env
 .git
 .gitignore
-
-# Docker
-Dockerfile
-.dockerignore
-
-# Python
-.venv
-.pytest_cache
 .mypy_cache
+.pytest_cache
 .ruff_cache
-node_modules
-.coverage
-coverage.xml
-instance
-__pycache__
+.venv
 *.pyc
 *.pyo
-*.pyd
-
-# IDEs and editors
-.vscode
-.idea
-*.swp
-*.swo
-
-# OS-specific
-.DS_Store
-Thumbs.db
-
-# Other
-.env
-deploy.log
+__pycache__
+instance

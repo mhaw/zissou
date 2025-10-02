@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Zissou{% endblock %}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/zissou_favicon.png') }}">
@@ -30,9 +31,10 @@
         </main>
         {% include 'partials/_footer.html' %}
     </div>
-    <script src="{{ url_for('static', filename='js/bucket-assignment.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/tag-components.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/load-more.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}" nonce="{{ csp_nonce() }}"></script>
+    <script src="{{ url_for('static', filename='js/bucket-assignment.js') }}" nonce="{{ csp_nonce() }}"></script>
+    <script src="{{ url_for('static', filename='js/tag-components.js') }}" nonce="{{ csp_nonce() }}"></script>
+    <script src="{{ url_for('static', filename='js/load-more.js') }}" nonce="{{ csp_nonce() }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

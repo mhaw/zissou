@@ -57,22 +57,26 @@ def build_user_context(
     }
 
 
-def get_current_user_from_cookie() -> Optional[dict[str, Any]]:
-    """Decode the Firebase session cookie if present and return user context."""
-    cookie = request.cookies.get(FB_COOKIE)
-    if not cookie:
+def get_current_user_from_token() -> Optional[dict[str, Any]]:
+    """Decode the Firebase ID token if present and return user context."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
         return None
+
     try:
-        decoded = firebase_auth.verify_session_cookie(cookie, check_revoked=True)
+        id_token = auth_header.split(" ").pop()
+        decoded = firebase_auth.verify_id_token(id_token, check_revoked=True)
         return build_user_context(decoded)
     except Exception as e:
-        current_app.logger.info(f"verify_session_cookie failed: {e.__class__.__name__}: {e}")
+        current_app.logger.info(f"verify_id_token failed: {e.__class__.__name__}: {e}")
         return None
 
 
 def ensure_user() -> Optional[dict[str, Any]]:
     """Ensure g.user is populated with the current authenticated user context."""
-    return g.get("user")
+    if not hasattr(g, "user"):
+        g.user = get_current_user_from_token()
+    return g.user
 
 
 def require_roles(*roles: str):
@@ -137,6 +141,6 @@ def role_required(*roles: str):
                 return response
             return view(*args, **kwargs)
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorator

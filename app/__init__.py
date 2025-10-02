@@ -233,7 +233,6 @@ def create_app():
         "'self'",
         "https://www.gstatic.com",
         "https://apis.google.com",
-        "https://unpkg.com",
     ]
     for source in additional_script_src:
         if source not in script_sources:
@@ -315,7 +314,12 @@ def create_app():
         app.register_blueprint(auth.auth_bp)
         print("Registered auth blueprint")
 
-    from app.auth import get_current_user_from_cookie, build_user_context
+    from .routes import csp
+    if "csp" not in app.blueprints:
+        app.register_blueprint(csp.csp_bp)
+        print("Registered csp blueprint")
+
+    from app.auth import get_current_user_from_token, build_user_context
 
     @app.before_request
     def attach_authenticated_user():
@@ -327,7 +331,7 @@ def create_app():
         if not app.config.get("AUTH_ENABLED", False):
             return
 
-        g.user = get_current_user_from_cookie()
+        g.user = get_current_user_from_token()
 
     if canonical_host:
 
