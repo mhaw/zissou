@@ -49,7 +49,7 @@ $(VENV_DIR)/bin/activate: requirements.txt
 install:
 	$(PIP) install -r requirements.txt
 
-dev: $(VENV_DIR)/bin/activate
+dev: validate $(VENV_DIR)/bin/activate
 	@echo "Starting Flask development server..."
 	@cp -n .env.example .env || true
 	$(PYTHON_BIN) -m dotenv run -- FLASK_APP=app/main.py $(FLASK) run -p 8080
@@ -75,7 +75,10 @@ build:
 	docker tag $(IMAGE_TAG) $(LATEST_TAG)
 	@echo "Tagged image as: $(LATEST_TAG)"
 
-run:
+validate:
+	@./validate_env.sh
+
+run: validate
 	. ./.venv/bin/activate && gunicorn --bind 0.0.0.0:8080 --workers 2 --threads 4 --worker-class gthread app.main:app
 
 grant-admin-role: $(VENV_DIR)/bin/activate

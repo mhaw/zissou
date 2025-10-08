@@ -93,9 +93,10 @@ const setLoading = (isLoading) => {
 
 // --- Auth Logic ---
 const sendIdTokenToServer = async (idToken) => {
+  const csrfToken = document.querySelector('input[name="csrf_token"]').value;
   const response = await fetch(tokenEndpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
     credentials: "include",
     redirect: "follow",
     body: JSON.stringify({ idToken, rememberMe: true, next: nextPath }),

@@ -16,7 +16,7 @@ if [ -z "$GCP_PROJECT_ID" ] || [ -z "$GCS_BUCKET" ] || [ -z "$GCP_REGION" ]; the
 fi
 
 echo "Configuring gcloud to use project $GCP_PROJECT_ID..."
-gcloud config set project $GCP_PROJECT_ID
+gcloud config set project $GCP_PROJECT_ID --quiet
 
 # APIs to enable
 SERVICES=(
