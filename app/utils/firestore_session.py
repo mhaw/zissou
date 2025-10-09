@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from flask.sessions import SessionInterface, SessionMixin
+from google.cloud import firestore
+from werkzeug.datastructures import CallbackDict
+
+
+class FirestoreSession(CallbackDict, SessionMixin):
+
+    def __init__(self, initial=None, sid=None, new=False):
+        def on_update(self):
+            self.modified = True
+
+        CallbackDict.__init__(self, initial, on_update)
+        self.sid = sid
+        self.new = new
+        self.modified = False
+
+
+class FirestoreSessionInterface(SessionInterface):
+    session_class = FirestoreSession
+
+    def __init__(self, db: firestore.Client, collection: str):
+        self.db = db
+        self.collection = collection
+
+    def open_session(self, app, request):
+        cookie_name = app.config.get("SESSION_COOKIE_NAME", "flask_session")
+        sid = request.cookies.get(cookie_name)
+        if not sid:
+            sid = str(uuid.uuid4())
+            return self.session_class(sid=sid, new=True)
+
+        doc_ref = self.db.collection(self.collection).document(sid)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            data = doc.to_dict() or {}
+            expiration = data.get("expiration")
+            now = datetime.now(timezone.utc)
+            if isinstance(expiration, datetime):
+                if expiration.tzinfo is None:
+                    expiration = expiration.replace(tzinfo=timezone.utc)
+                else:
+                    expiration = expiration.astimezone(timezone.utc)
+                if expiration > now:
+                    data["expiration"] = expiration
+                    return self.session_class(data, sid=sid)
+
+        return self.session_class(sid=sid, new=True)
+
+    def save_session(self, app, session, response):
+        domain = self.get_cookie_domain(app)
+        cookie_name = app.config.get("SESSION_COOKIE_NAME", "flask_session")
+        if not session:
+            response.delete_cookie(cookie_name, domain=domain)
+            return
+
+        if session.modified:
+            session_data = dict(session)
+            session_data["expiration"] = (
+                datetime.now(timezone.utc) + app.permanent_session_lifetime
+            )
+            doc_ref = self.db.collection(self.collection).document(session.sid)
+            doc_ref.set(session_data)
+
+        response.set_cookie(
+            cookie_name,
+            session.sid,
+            expires=self.get_expiration_time(app, session),
+            httponly=True,
+            domain=domain,
+            path=self.get_cookie_path(app),
+            secure=self.get_cookie_secure(app),
+            samesite=self.get_cookie_samesite(app),
+        )

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Changed the default authentication method from Google Cloud IAP to the built-in Firebase Authentication. This simplifies the deployment process and removes the need for a costly external HTTPS Load Balancer, making the application more accessible and cost-effective for internal use.
+- The `AUTH_BACKEND` environment variable now defaults to `firebase`.
+- Documentation in `README_AUTH.md` has been updated to reflect Firebase as the primary, recommended authentication strategy.
+- Google Cloud IAP remains a fully supported option for advanced use cases requiring infrastructure-level perimeter security.
+
 ### Security
 - **Content Security Policy (CSP)**: Implemented a strict, nonce-based CSP to mitigate XSS attacks. The policy is configured to allow the necessary Firebase domains for authentication while blocking untrusted scripts and resources. A reporting endpoint has been added to monitor for violations.
 

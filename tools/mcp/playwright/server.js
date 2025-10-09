@@ -5,8 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
-import { Server } from "@modelcontextprotocol/sdk/server.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/stdio.js";
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,44 +17,26 @@ await mkdir(artifactsDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 
-const server = new Server({
+const server = new McpServer({
   name: "zissou-playwright",
   version: "0.1.0",
   description: "Playwright-backed MCP server for Zissou",
 });
 
-server.tool(
+server.registerTool(
   "navigate",
   {
     description:
       "Navigate to a URL, optionally waiting for network idle and capturing a screenshot.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        url: {
-          type: "string",
-          description: "Destination URL to open.",
-        },
-        waitUntil: {
-          type: "string",
-          enum: ["load", "domcontentloaded", "networkidle"],
-          description: "Playwright waitUntil option (default: load).",
-        },
-        viewport: {
-          type: "object",
-          description: "Optional viewport size { width, height }.",
-          properties: {
-            width: { type: "number" },
-            height: { type: "number" },
-          },
-        },
-        screenshot: {
-          type: "boolean",
-          description: "Whether to capture a full-page screenshot (default: false).",
-        },
-      },
-      required: ["url"],
-    },
+    inputSchema: z.object({
+      url: z.string().describe("Destination URL to open."),
+      waitUntil: z.enum(["load", "domcontentloaded", "networkidle"]).optional().describe("Playwright waitUntil option (default: load)."),
+      viewport: z.object({
+        width: z.number(),
+        height: z.number(),
+      }).optional().describe("Optional viewport size { width, height }."),
+      screenshot: z.boolean().optional().describe("Whether to capture a full-page screenshot (default: false)."),
+    }),
   },
   async ({
     url,
@@ -61,16 +44,19 @@ server.tool(
     viewport,
     screenshot = false,
   }) => {
-    const context = await browser.newContext(
-      viewport && viewport.width && viewport.height
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IjE3ZjBmMGYxNGU5Y2FmYTlhYjUxODAxNTBhZTcxNGM5ZmQxYjVjMjYiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiIzMjU1NTk0MDU1OS5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsImF6cCI6InBsYXl3cmlnaHQtdGVzdGVyQHppc3NvdS00NzE2MDMuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLCJlbWFpbCI6InBsYXl3cmlnaHQtdGVzdGVyQHppc3NvdS00NzE2MDMuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiZXhwIjoxNzU5ODE4NTg5LCJpYXQiOjE3NTk4MTQ5ODksImlzcyI6Imh0dHBzOi8vYWNjb3VudHMuZ29vZ2xlLmNvbSIsInN1YiI6IjExODM1Nzg4OTUwNDQwMjA5MjI0OCJ9.OxxYERra_nt8ctGDEwzsZGpFCkYh5Q1UDQUB5oF1Iq8AIcdDciSn2IdD2QNeXxO7HeKQY5cSnBVQt2GHSoxgQ6E-wUXuJzZIZYBsstAaTTfqEWnNeadlr7IY1HtOs67znA1mDKsMbwXvGShniAhFfgn0RyYuKyyCHlFudAyMF75sSWI8rXBWyA1uH4WxThTyaJ40_qxuZvnFM7TMfmJoWzOMf_XlyeaGDOXVIUYLnj_U0WIhvnohFlg_F7jFQ1zy5Lp-Rna21eed_hC4XCHCzHr6cG5DlwIR8Sw5tkzheVS--ua5Q6r8ZzcVyHd0kK33eemOFkJaFNrglqUn4EvW1w'
+      },
+      ...(viewport && viewport.width && viewport.height
         ? {
             viewport: {
               width: Math.floor(viewport.width),
               height: Math.floor(viewport.height),
             },
           }
-        : undefined
-    );
+        : {})
+    });
     const page = await context.newPage();
     try {
       await page.goto(url, { waitUntil });
@@ -104,32 +90,22 @@ server.tool(
   }
 );
 
-server.tool(
+server.registerTool(
   "get_text",
   {
     description: "Return the text content for a selector on the requested page.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        url: {
-          type: "string",
-          description: "Page url to load before querying the selector.",
-        },
-        selector: {
-          type: "string",
-          description: "CSS selector to evaluate.",
-        },
-        timeout: {
-          type: "number",
-          description:
-            "Optional timeout in milliseconds to wait for the selector before failing.",
-        },
-      },
-      required: ["url", "selector"],
-    },
+    inputSchema: z.object({
+      url: z.string().describe("Page url to load before querying the selector."),
+      selector: z.string().describe("CSS selector to evaluate."),
+      timeout: z.number().optional().describe("Optional timeout in milliseconds to wait for the selector before failing."),
+    }),
   },
   async ({ url, selector, timeout = 5000 }) => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IjE3ZjBmMGYxNGU5Y2FmYTlhYjUxODAxNTBhZTcxNGM5ZmQxYjVjMjYiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiIzMjU1NTk0MDU1OS5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsImF6cCI6InBsYXl3cmlnaHQtdGVzdGVyQHppc3NvdS00NzE2MDMuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLCJlbWFpbCI6InBsYXl3cmlnaHQtdGVzdGVyQHppc3NvdS00NzE2MDMuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiZXhwIjoxNzU5ODE4NTg5LCJpYXQiOjE3NTk4MTQ5ODksImlzcyI6Imh0dHBzOi8vYWNjb3VudHMuZ29vZ2xlLmNvbSIsInN1YiI6IjExODM1Nzg4OTUwNDQwMjA5MjI0OCJ9.OxxYERra_nt8ctGDEwzsZGpFCkYh5Q1UDQUB5oF1Iq8AIcdDciSn2IdD2QNeXxO7HeKQY5cSnBVQt2GHSoxgQ6E-wUXuJzZIZYBsstAaTTfqEWnNeadlr7IY1HtOs67znA1mDKsMbwXvGShniAhFfgn0RyYuKyyCHlFudAyMF75sSWI8rXBWyA1uH4WxThTyaJ40_qxuZvnFM7TMfmJoWzOMf_XlyeaGDOXVIUYLnj_U0WIhvnohFlg_F7jFQ1zy5Lp-Rna21eed_hC4XCHCzHr6cG5DlwIR8Sw5tkzheVS--ua5Q6r8ZzcVyHd0kK33eemOFkJaFNrglqUn4EvW1w'
+      }
+    });
     const page = await context.newPage();
     try {
       await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -161,10 +137,18 @@ server.tool(
 );
 
 const transport = new StdioServerTransport();
-await server.start(transport);
+server.connect(transport)
+  .then(() => {
+    console.log('MCP Playwright Server connected and ready via stdio.');
+  })
+  .catch(error => {
+    console.error('Failed to connect MCP Playwright Server:', error);
+    process.exit(1);
+  });
 
 const shutdown = async () => {
   try {
+    await server.disconnect();
     await browser.close();
   } finally {
     process.exit(0);

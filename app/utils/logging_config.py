@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - otel optional in some environments
 
 def setup_logging():
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -34,9 +34,11 @@ def setup_logging():
     root_logger.handlers.clear()
 
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processor=structlog.processors.JSONRenderer(),
-    ))
+    console_handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processor=structlog.processors.JSONRenderer(),
+        )
+    )
     root_logger.addHandler(console_handler)
 
     if os.getenv("ENV") == "development":
@@ -47,9 +49,11 @@ def setup_logging():
         file_handler = logging.handlers.RotatingFileHandler(
             log_file, maxBytes=1024 * 1024 * 5, backupCount=5  # 5 MB per file
         )
-        file_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-            processor=structlog.processors.JSONRenderer(),
-        ))
+        file_handler.setFormatter(
+            structlog.stdlib.ProcessorFormatter(
+                processor=structlog.processors.JSONRenderer(),
+            )
+        )
         root_logger.addHandler(file_handler)
         logging.info(f"Development log file enabled at: {log_file}")
 

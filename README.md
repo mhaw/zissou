@@ -78,6 +78,27 @@ make dev
 
 The app will be available at `http://localhost:8080`.
 
+## Testing
+
+### Backend unit tests
+
+Run the Flask unit test suite with:
+
+```bash
+make test
+```
+
+### Playwright end-to-end checks
+
+Install the browser binaries once per machine and execute the Playwright scenarios. These tests expect a local server on `http://localhost:8080`; start it separately with `make dev` or set `PLAYWRIGHT_BASE_URL` to point at another environment.
+
+```bash
+npx playwright install
+npm run test:e2e
+```
+
+HTML reports are written to `reports/playwright`.
+
 ## Cloud Deployment
 
 ### Step 1: Set up GCP Infrastructure

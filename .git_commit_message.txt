@@ -1,0 +1,50 @@
+feat(auth): Harden Firebase Authentication and improve DX
+
+This commit addresses several issues related to Firebase Authentication,
+improving security, developer experience, and testability.
+
+Key changes include:
+
+- **CORS Implementation:** Integrated Flask-CORS to explicitly manage
+  Cross-Origin Resource Sharing, preventing potential issues with
+  cross-domain requests from client-side Firebase SDKs. Configured
+  to allow specified origins from `ALLOWED_ORIGINS` environment variable.
+- **Configuration Hygiene:** Updated `.env.example` to include all
+  relevant authentication-related environment variables, providing
+  clear guidance for setup in different environments.
+- **CSP Refinement:** Reviewed and confirmed Content Security Policy
+  directives to ensure all necessary Firebase endpoints are whitelisted,
+  mitigating CSP blocking issues.
+- **Protected Endpoints Verification:** Audited server-side routes
+  (`feeds.py`, `tasks.py`, `admin.py`) to confirm consistent
+  authentication and authorization enforcement using `@auth_required`
+  and `@role_required` decorators or Cloud Tasks-specific verification.
+- **Makefile Enhancements:** Added new `Makefile` targets for:
+    - `auth:diag`: To display current authentication configuration.
+    - `auth:emulators`: To provide instructions for running Firebase emulators.
+    - `test:e2e-auth`: To run Playwright E2E authentication tests.
+    - `grant-admin-role`: To easily set admin claims for users via a new CLI tool.
+- **E2E Test Suite:** Introduced a basic Playwright E2E test (`login_flow.spec.js`)
+  to cover core authentication flows (sign-in, protected access, sign-out,
+  unauthenticated access denial).
+- **Admin Claims CLI:** Created `tools/set_admin_claim.py` to simplify
+  managing admin roles for users via Firebase custom claims.
+- **Comprehensive Documentation:** Added a `docs/auth/` directory containing:
+    - `README.md`: Overview of the authentication system and flow.
+    - `CHECKLIST.md`: Firebase & GCP console configuration checklist.
+    - `CSP.md`: Rationale and exact directives for Content Security Policy.
+    - `RUNBOOK.md`: Guide for local development vs. production setup.
+
+This work significantly hardens the authentication system, improves
+developer onboarding, and provides a robust foundation for future
+authentication-related features.
+
+Next Steps:
+- Integrate the E2E tests into the CI/CD pipeline.
+- Implement correlation ID middleware for improved logging and observability.
+- Add basic metrics counters for login success/failure and 401/403s.
+
+Optional Enhancements:
+- Implement re-authentication for sensitive operations.
+- Integrate Cloud Armor rate-limiting for abuse prevention.
+- Add reCAPTCHA Enterprise for enhanced bot protection.

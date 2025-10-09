@@ -140,7 +140,45 @@ def token():
         },
     )
 
-    return jsonify({"token": id_token})
+    remember_me = bool(payload.get("rememberMe"))
+    # Session cookie lifetime defaults: 5 days or 30 days when remember me is set.
+    session_lifetime = timedelta(days=30 if remember_me else 5)
+    try:
+        session_cookie = firebase_auth.create_session_cookie(
+            id_token, expires_in=session_lifetime
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "Failed to mint Firebase session cookie: %s",
+            exc,
+            extra={
+                "auth_event": "login_failure",
+                "reason": "session_cookie_error",
+                "ip": request.remote_addr,
+            },
+        )
+        return jsonify({"error": "internal server error"}), 500
+
+    response = make_response(jsonify({"token": id_token}))
+
+    session["uid"] = user.id
+    session["role"] = user.role
+    session["email"] = user.email
+    session["remember_me"] = remember_me
+    session.permanent = remember_me
+
+    max_age = int(session_lifetime.total_seconds())
+    response.set_cookie(
+        FB_COOKIE,
+        session_cookie,
+        max_age=max_age,
+        secure=True,
+        httponly=True,
+        samesite="Lax",
+        path="/",
+    )
+
+    return response
 
 
 @auth_bp.post("/logout")

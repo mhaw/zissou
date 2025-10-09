@@ -8,6 +8,12 @@
         "GOOGLE_CLOUD_REGION": "us-central1",
         "DEFAULT_SERVICE_NAME": "your-service"
       }
+    
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }

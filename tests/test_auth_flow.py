@@ -23,15 +23,18 @@ def client():
 
         # Ensure Firestore-backed helpers are skipped during tests.
         from app import auth as auth_module
+
         auth_module.users_service.db = None
 
         if "protected" not in app.view_functions:
+
             @app.route("/protected")
             @auth_required
             def protected():
                 return "ok"
 
         if "admin_only" not in app.view_functions:
+
             @app.route("/admin-only")
             @role_required("admin")
             def admin_only():
@@ -39,6 +42,7 @@ def client():
 
         with app.test_client() as test_client:
             yield test_client
+
 
 def _iap_headers(email_header: str, id_header: str | None = None) -> dict[str, str]:
     headers = {
