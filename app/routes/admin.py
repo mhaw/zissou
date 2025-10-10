@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, g
+from flask_wtf.csrf import CSRFError
 
 import app.auth as auth
 from app.auth import require_roles
@@ -28,6 +29,16 @@ from app.services.tasks import (
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 logger = logging.getLogger(__name__)
+
+
+@bp.errorhandler(CSRFError)
+def handle_admin_csrf_error(exc: CSRFError):
+    logger.warning("Admin CSRF validation failed: %s", exc.description)
+    flash(
+        "Your admin session expired or is invalid. Please refresh the page and try again.",
+        "error",
+    )
+    return redirect(url_for("admin.index"))
 
 
 @bp.before_request

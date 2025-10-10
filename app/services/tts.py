@@ -82,7 +82,7 @@ VOICE_PROFILES = {
     },
     "story-teller": {
         "name": "en-US-Studio-Q",
-        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "gender": texttospeech.SsmlVoiceGender.MALE,
         "description": "Story Teller (US Studio, Expressive)",
         "speaking_rate": 1.0,
         "pitch": 0.0,

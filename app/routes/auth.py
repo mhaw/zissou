@@ -33,33 +33,25 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 bp = auth_bp
 
 
-def _require_firebase_backend():
-    if current_app.config.get("AUTH_BACKEND") != "firebase":
-        abort(404)
-
-
 @auth_bp.get("/login")
 def login():
-    _require_firebase_backend()
     next_path = request.args.get("next", "/")
 
     if not current_app.config.get("AUTH_ENABLED", False):
         return redirect(next_path or "/")
 
-    firebase_config = {
-        "apiKey": current_app.config.get("FIREBASE_WEB_API_KEY", ""),
-        "authDomain": current_app.config.get("FIREBASE_AUTH_DOMAIN", ""),
-        "projectId": current_app.config.get("FIREBASE_PROJECT_ID", ""),
-    }
-
-    missing = [key for key, value in firebase_config.items() if not value]
-    if missing:
-        logger.warning("Missing Firebase config keys: %s", ", ".join(missing))
+    auth_config = current_app.config["FIREBASE_AUTH_CONFIG"]
+    config_dict = auth_config.to_dict()
+    error_message = None
+    if not auth_config.is_valid:
+        error_message = "Login is not configured. Please contact an administrator."
+        logger.error("Firebase auth is enabled, but configuration is incomplete.")
 
     return render_template(
         "login.html",
         next_path=next_path,
-        firebase_config=firebase_config,
+        firebase_config=config_dict,
+        error=error_message,
     )
 
 
@@ -67,7 +59,6 @@ def login():
 @csrf.exempt
 @limiter.limit("20/minute")
 def token():
-    _require_firebase_backend()
     if not current_app.config.get("AUTH_ENABLED", False):
         return jsonify({"error": "auth disabled"}), 403
 
@@ -111,7 +102,15 @@ def token():
         )
         return jsonify({"error": "revoked idToken"}), 401
     except Exception as e:
-        logger.error(f"Failed to create session cookie: {e}")
+        logger.error(
+            "Failed to create session cookie: %s",
+            e,
+            extra={
+                "auth_event": "login_failure",
+                "reason": "internal_server_error",
+                "ip": request.remote_addr,
+            },
+        )
         return jsonify({"error": "internal server error"}), 500
 
     # Create user in Firestore if they don't exist
@@ -121,7 +120,16 @@ def token():
             transaction, decoded_id_token
         )
     except users_service.FirestoreError as e:
-        logger.error(f"Failed to get or create user: {e}")
+        logger.error(
+            "Failed to get or create user: %s",
+            e,
+            extra={
+                "auth_event": "user_persistence_failure",
+                "reason": "firestore_error",
+                "ip": request.remote_addr,
+                "uid": decoded_id_token.get("uid"),
+            },
+        )
         return jsonify({"error": "internal server error"}), 500
 
     auth_method = decoded_id_token.get("firebase", {}).get(
@@ -141,8 +149,8 @@ def token():
     )
 
     remember_me = bool(payload.get("rememberMe"))
-    # Session cookie lifetime defaults: 5 days or 30 days when remember me is set.
-    session_lifetime = timedelta(days=30 if remember_me else 5)
+    # Session cookie lifetime defaults: 5 days or 14 days when remember me is set.
+    session_lifetime = timedelta(days=14 if remember_me else 5)
     try:
         session_cookie = firebase_auth.create_session_cookie(
             id_token, expires_in=session_lifetime
@@ -183,7 +191,6 @@ def token():
 
 @auth_bp.post("/logout")
 def logout():
-    _require_firebase_backend()
     """Logs the user out."""
     session.clear()
     flash("You have been signed out.", "info")
@@ -192,7 +199,6 @@ def logout():
 
 @auth_bp.post("/logout_post")
 def logout_post():
-    _require_firebase_backend()
     """Handles the actual logout logic, including revoking tokens and clearing cookies."""
     user = g.user
     if not user:

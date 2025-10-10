@@ -1,14 +1,19 @@
-import json
-import os
 import logging
+import os
+import traceback
 
 import firebase_admin  # type: ignore[import-untyped]
+import flask_limiter
 from dotenv import load_dotenv
 from flask import Flask, g, request, redirect, send_from_directory
 
 from app.extensions import cache, limiter
+from app.utils.firestore_cache import FirestoreCache
 from app.utils.logging_config import setup_logging
 import app.utils.firestore_storage  # Ensures registration  # noqa: F401
+from google.api_core.exceptions import GoogleAPICallError
+from google.auth.exceptions import DefaultCredentialsError
+from limits.storage import storage_from_string
 
 # OpenTelemetry Imports for Tracing
 # from opentelemetry import trace
@@ -18,14 +23,16 @@ import app.utils.firestore_storage  # Ensures registration  # noqa: F401
 # from opentelemetry.exporter.gcp_trace import CloudTraceSpanExporter
 
 
-def _validate_environment():
+from app.config import CSRFConfig, FirebaseAuthConfig
+
+
+def _validate_environment(firebase_auth_config: FirebaseAuthConfig):
     """Check for required environment variables and raise RuntimeError if missing."""
     logger = logging.getLogger(__name__)
     required_vars = [
         "GCP_PROJECT_ID",
         "GCS_BUCKET",
     ]
-    auth_backend = (os.getenv("AUTH_BACKEND") or "iap").strip().lower()
     # FLASK_SECRET_KEY is also checked below, but we include it here for a clearer error message.
     if not os.getenv("FLASK_SECRET_KEY") and not os.getenv("SECRET_KEY"):
         required_vars.append("FLASK_SECRET_KEY")
@@ -41,17 +48,16 @@ def _validate_environment():
             ]
         )
 
-    # If the Firebase backend is active, make sure all client configuration exists.
+    # If auth is enabled, make sure all client configuration exists.
     if (
-        auth_backend == "firebase"
-        and os.getenv("AUTH_ENABLED", "false").lower() == "true"
+        os.getenv("AUTH_ENABLED", "false").lower() == "true"
+        and not firebase_auth_config.is_valid
     ):
         required_vars.extend(
             [
                 "FIREBASE_PROJECT_ID",
                 "FIREBASE_WEB_API_KEY",
                 "FIREBASE_AUTH_DOMAIN",
-                "ALLOWED_ORIGINS",
             ]
         )
 
@@ -73,6 +79,98 @@ def _parse_csp_values(raw_value: str | None) -> list[str]:
     ]
 
 
+def init_extensions(app, default_timeout: int) -> None:
+    """Configure cache, limiter, and related extensions."""
+    env_name = (app.config.get("ENV") or "").strip().lower()
+    limiter_version = getattr(flask_limiter, "__version__", "0")
+    app.logger.info("Flask-Limiter version: %s", limiter_version)
+    cache_type_env = (os.getenv("CACHE_TYPE") or "").strip()
+
+    # Determine cache backend: explicit env takes precedence, otherwise default by env.
+    if cache_type_env:
+        selected_cache_type = cache_type_env
+    elif env_name == "production":
+        selected_cache_type = "RedisCache"
+    else:
+        selected_cache_type = "SimpleCache"
+
+    cache_config: dict[str, str | int] = {
+        "CACHE_TYPE": selected_cache_type,
+        "CACHE_DEFAULT_TIMEOUT": default_timeout,
+    }
+
+    if selected_cache_type.lower() in {"redis", "rediscache"}:
+        redis_url = (os.getenv("CACHE_REDIS_URL") or os.getenv("REDIS_URL") or "").strip()
+        if redis_url:
+            cache_config["CACHE_TYPE"] = "RedisCache"
+            cache_config["CACHE_REDIS_URL"] = redis_url
+        else:
+            if env_name == "production":
+                app.logger.error(
+                    "CACHE_TYPE is RedisCache but CACHE_REDIS_URL is not set; falling back to SimpleCache."
+                )
+            cache_config["CACHE_TYPE"] = "SimpleCache"
+    elif selected_cache_type.lower() in {"filesystem", "filesystemcache"}:
+        cache_dir = os.getenv("CACHE_DIR") or os.path.join(app.instance_path, "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_config["CACHE_TYPE"] = "FileSystemCache"
+        cache_config["CACHE_DIR"] = cache_dir
+    elif selected_cache_type.lower() in {"firestore", "firestorecache"}:
+        if hasattr(app, "firestore_client") and app.firestore_client:
+            collection = os.getenv("CACHE_FIRESTORE_COLLECTION", "zissou-cache")
+            cache_config["CACHE_TYPE"] = FirestoreCache(
+                client=app.firestore_client,
+                collection=collection,
+                default_timeout=default_timeout,
+            )
+        else:
+            app.logger.error(
+                "CACHE_TYPE is Firestore but Firestore client is not available; falling back to SimpleCache."
+            )
+            cache_config["CACHE_TYPE"] = "SimpleCache"
+    elif selected_cache_type.lower() == "nullcache":
+        cache_config["CACHE_TYPE"] = "NullCache"
+    elif selected_cache_type.lower() not in {"simplecache", "nullcache"}:
+        # Unrecognised backend; fall back to SimpleCache to keep the service running.
+        app.logger.error(
+            "Unsupported CACHE_TYPE '%s'; falling back to SimpleCache.", selected_cache_type
+        )
+        cache_config["CACHE_TYPE"] = "SimpleCache"
+
+    cache.init_app(app, config=cache_config)
+    app.config.update(cache_config)
+    app.logger.info("Configured Flask-Caching backend: %s", app.config["CACHE_TYPE"])
+    app.logger.info("Cache backend: %s", app.config["CACHE_TYPE"])
+
+    storage_uri_env = (os.getenv("RATELIMIT_STORAGE_URI") or "").strip()
+    storage_uri = storage_uri_env
+    if not storage_uri:
+        if app.config["CACHE_TYPE"] == "RedisCache" and app.config.get("CACHE_REDIS_URL"):
+            storage_uri = app.config["CACHE_REDIS_URL"]
+        elif env_name == "production":
+            storage_uri = "memory://"
+        else:
+            storage_uri = "memory://"
+
+    try:
+        storage = storage_from_string(storage_uri)
+    except Exception as exc:  # pragma: no cover - fail-safe for boot issues
+        app.logger.error(
+            "Failed to initialize rate limiter storage '%s': %s. Falling back to memory://",
+            storage_uri,
+            exc,
+        )
+        storage_uri = "memory://"
+        storage = storage_from_string(storage_uri)
+
+    app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+
+    limiter.init_app(app)
+
+    app.logger.info("Rate limit storage initialized: %s", storage_uri)
+    app.logger.info("Rate limiter storage: %s", app.config["RATELIMIT_STORAGE_URI"])
+
+
 def create_app():
     """Create and configure an instance of the Flask application."""
     load_dotenv()
@@ -81,16 +179,26 @@ def create_app():
     setup_logging()
     logger = logging.getLogger(__name__)
 
-    _validate_environment()
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+    alias_project_id = os.getenv("GCP_PROJECT_ID") or os.getenv("GCLOUD_PROJECT")
+    if not project_id and alias_project_id:
+        os.environ["GOOGLE_CLOUD_PROJECT"] = alias_project_id
+        project_id = alias_project_id
+    if project_id:
+        os.environ.setdefault("GCLOUD_PROJECT", project_id)
+
+    firebase_auth_config = FirebaseAuthConfig.from_env()
+    csrf_config = CSRFConfig.from_env()
+    _validate_environment(firebase_auth_config)
 
     logger.info("Application starting with configuration:")
     logger.info(f"  ENV: {os.getenv('ENV')}")
     logger.info(f"  GCP_PROJECT_ID: {os.getenv('GCP_PROJECT_ID')}")
+    logger.info(f"  GOOGLE_CLOUD_PROJECT: {os.getenv('GOOGLE_CLOUD_PROJECT')}")
     logger.info(f"  GCS_BUCKET: {os.getenv('GCS_BUCKET')}")
     logger.info(f"  AUTH_ENABLED: {os.getenv('AUTH_ENABLED')}")
-    logger.info(f"  AUTH_BACKEND: {os.getenv('AUTH_BACKEND', 'iap')}")
-    logger.info(f"  CACHE_TYPE: {os.getenv('CACHE_TYPE')}")
-    logger.info(f"  RATELIMIT_STORAGE_URI: {os.getenv('RATELIMIT_STORAGE_URI')}")
+    logger.info(f"  CACHE_TYPE (env): {os.getenv('CACHE_TYPE')}")
+    logger.info(f"  RATELIMIT_STORAGE_URI (env): {os.getenv('RATELIMIT_STORAGE_URI')}")
 
     # Set up OpenTelemetry Tracing
     # if os.getenv("ENV") == "production":
@@ -102,9 +210,6 @@ def create_app():
 
     app = Flask(__name__, instance_relative_config=True)
     # Wrap with whitenoise for static file serving
-    from whitenoise import WhiteNoise
-
-    app.wsgi_app = WhiteNoise(app.wsgi_app, root="app/static/", prefix="/static")
 
     # Instrument the Flask app
     # if os.getenv("ENV") == "production":
@@ -121,10 +226,6 @@ def create_app():
     is_development = env_name == "development"
     if is_development:
         app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-    auth_backend = (os.getenv("AUTH_BACKEND") or "iap").strip().lower()
-    if auth_backend not in {"firebase", "iap"}:
-        logger.warning("Unknown AUTH_BACKEND %s; defaulting to 'iap'.", auth_backend)
-        auth_backend = "iap"
     auth_enabled_raw = os.getenv("AUTH_ENABLED")
     auth_enabled = False
     if isinstance(auth_enabled_raw, str):
@@ -139,14 +240,6 @@ def create_app():
             "FLASK_SESSION_COOKIE_SECURE is disabled outside development; browsers may drop session cookies."
         )
 
-    firebase_project_id = None
-    firebase_web_api_key = None
-    firebase_auth_domain = None
-    if auth_backend == "firebase":
-        firebase_project_id = os.getenv("FIREBASE_PROJECT_ID")
-        firebase_web_api_key = os.getenv("FIREBASE_WEB_API_KEY")
-        firebase_auth_domain = os.getenv("FIREBASE_AUTH_DOMAIN")
-
     admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
     admin_emails = [
         email.strip().lower() for email in admin_emails_raw.split(",") if email.strip()
@@ -156,74 +249,67 @@ def create_app():
     ).strip()
     canonical_host = canonical_host.lower() or None
 
-    # Determine storage URI for Flask-Limiter
-    storage_uri = "memory://"
-    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GOOGLE_CLOUD_PROJECT"):
-        storage_uri = os.getenv("RATELIMIT_STORAGE_URI", "firestore://rate_limits")
-    else:
-        logger.warning("Rate limiter falling back to in-memory storage.")
-
     app.config.from_mapping(
         SECRET_KEY=secret_key,
         WTF_CSRF_ENABLED=True,
-        WTF_CSRF_SECRET_KEY=os.getenv("CSRF_SECRET_KEY", "a-different-secret-key"),
+        WTF_CSRF_SECRET_KEY=csrf_config.secret_key,
+        WTF_CSRF_TIME_LIMIT=csrf_config.time_limit_seconds,
         SESSION_COOKIE_NAME="flask_session",
         SESSION_COOKIE_SECURE=True,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         AUTH_ENABLED=auth_enabled,
-        AUTH_BACKEND=auth_backend,
-        FIREBASE_PROJECT_ID=firebase_project_id,
-        FIREBASE_WEB_API_KEY=firebase_web_api_key,
-        FIREBASE_AUTH_DOMAIN=firebase_auth_domain,
-        ADMIN_EMAILS=admin_emails,
-        RATELIMIT_STORAGE_URI=storage_uri,
+        FIREBASE_AUTH_CONFIG=firebase_auth_config,
+        RATELIMIT_STORAGE_URI=os.getenv("RATELIMIT_STORAGE_URI"),
         CANONICAL_HOST=canonical_host,
     )
 
     from app.utils.firestore_session import FirestoreSessionInterface
     from google.cloud import firestore
 
-    db = firestore.Client()
-    app.session_interface = FirestoreSessionInterface(db, "sessions")
+    firestore_kwargs: dict[str, str] = {}
+    if project_id:
+        firestore_kwargs["project"] = project_id
 
-    if auth_backend == "firebase" and auth_enabled and not firebase_project_id:
-        raise RuntimeError("FIREBASE_PROJECT_ID must be set when AUTH_ENABLED is true")
+    if os.getenv("FIRESTORE_EMULATOR_HOST"):
+        logger.info(
+            "Firestore emulator detected at %s", os.getenv("FIRESTORE_EMULATOR_HOST")
+        )
 
-    firebase_app = None
-    if auth_backend == "firebase" and firebase_project_id and not firebase_admin._apps:
+    firestore_client = None
+    try:
+        firestore_client = firestore.Client(**firestore_kwargs)
+    except (DefaultCredentialsError, GoogleAPICallError) as exc:
+        logger.error("Failed to initialize Firestore session store: %s", exc)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception(
+            "Unexpected error while initializing Firestore session store: %s", exc
+        )
+
+    # Attach the client to the app for use in extensions.
+    app.firestore_client = firestore_client
+
+    # Initialize extensions like caching and rate limiting *after* the client is ready.
+    init_extensions(app, default_timeout)
+
+    # Now, set up the session interface.
+    app.session_interface = FirestoreSessionInterface(firestore_client, "sessions")
+
+    if (
+        app.config.get("AUTH_ENABLED")
+        and not app.config.get("FIREBASE_AUTH_CONFIG").is_valid
+    ):
+        raise RuntimeError(
+            "Firebase authentication is enabled, but the configuration is invalid."
+        )
+
+    if app.config.get("AUTH_ENABLED") and not firebase_admin._apps:
         firebase_admin.initialize_app()
 
-    if auth_backend == "firebase" and firebase_admin._apps:
-        firebase_app = firebase_admin.get_app()
-        logger.info(
-            "Firebase Admin project_id: %s",
-            getattr(firebase_app, "project_id", None),
-        )
-        logger.info(
-            "Firebase client project_id (login page): %s",
-            firebase_project_id,
-        )
-        if (
-            firebase_app
-            and getattr(firebase_app, "project_id", None)
-            and firebase_project_id
-            and firebase_app.project_id != firebase_project_id
-        ):
-            logger.error(
-                "Firebase Admin project_id does not match client configuration",
-                extra={
-                    "firebase_admin_project_id": firebase_app.project_id,
-                    "firebase_client_project_id": firebase_project_id,
-                },
-            )
-
     from app.extensions import csrf
-    from flask_cors import CORS # Import CORS
+    from flask_cors import CORS  # Import CORS
 
     csrf.init_app(app)
-
-    limiter.init_app(app)
 
     # New: CORS configuration
     allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "").strip()
@@ -235,8 +321,10 @@ def create_app():
         allowed_origins.append("http://localhost:5000")
     if "http://127.0.0.1:5000" not in allowed_origins:
         allowed_origins.append("http://127.0.0.1:5000")
-    if os.getenv("ENV") != "production": # Allow all for non-prod, or more specific for Cloud Run dev
-        allowed_origins.append("https://*.run.app") # For Cloud Run development
+    if (
+        os.getenv("ENV") != "production"
+    ):  # Allow all for non-prod, or more specific for Cloud Run dev
+        allowed_origins.append("https://*.run.app")  # For Cloud Run development
 
     # Add canonical host if present
     canonical_host = app.config.get("CANONICAL_HOST")
@@ -249,76 +337,13 @@ def create_app():
 
     from flask_talisman import Talisman
 
-    firebase_auth_domain = app.config.get("FIREBASE_AUTH_DOMAIN") or ""
-    additional_connect_src = _parse_csp_values(os.getenv("CSP_ADDITIONAL_CONNECT_SRC"))
-    additional_script_src = _parse_csp_values(os.getenv("CSP_ADDITIONAL_SCRIPT_SRC"))
-    additional_style_src = _parse_csp_values(os.getenv("CSP_ADDITIONAL_STYLE_SRC"))
-
-    connect_sources = [
-        "'self'",
-        "https://securetoken.googleapis.com",
-        "https://identitytoolkit.googleapis.com",
-        "https://www.googleapis.com",
-        "https://firebaseinstallations.googleapis.com",
-    ]
-    for source in additional_connect_src:
-        if source not in connect_sources:
-            connect_sources.append(source)
-
-    script_sources = [
-        "'self'",
-        "https://www.gstatic.com",
-        "https://apis.google.com",
-    ]
-    for source in additional_script_src:
-        if source not in script_sources:
-            script_sources.append(source)
-
-    style_sources = ["'self'", "data:"]
-    for source in additional_style_src:
-        if source not in style_sources:
-            style_sources.append(source)
-
-    report_uri = os.getenv("CSP_REPORT_URI")
-    report_to_group = os.getenv("CSP_REPORT_TO", "default-csp-endpoint")
-    report_to_endpoint = os.getenv("CSP_REPORT_TO_ENDPOINT") or report_uri
-
-    content_security_policy = {
-        "default-src": ["'self'"],
-        "connect-src": connect_sources,
-        "script-src": script_sources,
-        "style-src": style_sources,
-        "img-src": ["'self'", "data:"],
-        "font-src": ["'self'", "https://fonts.gstatic.com"],
-        "frame-src": ["'self'", "https://apis.google.com"],
-        "base-uri": ["'self'"],
-        "form-action": ["'self'"],
-    }
-
-    if firebase_auth_domain:
-        iframe_origin = f"https://{firebase_auth_domain}"
-        if iframe_origin not in content_security_policy["frame-src"]:
-            content_security_policy["frame-src"].append(iframe_origin)
-
-    if report_uri:
-        content_security_policy["report-uri"] = report_uri
-
-    report_to_header: str | None = None
-    if report_to_endpoint:
-        report_to_header = json.dumps(
-            {
-                "group": report_to_group,
-                "max_age": 60 * 60 * 24 * 30,
-                "endpoints": [{"url": report_to_endpoint}],
-            }
-        )
-
     Talisman(
         app,
-        content_security_policy=content_security_policy,
+        content_security_policy=None,
         content_security_policy_nonce_in=["script-src", "style-src"],
     )
 
+    report_to_header = os.getenv("REPORT_TO_HEADER")
     if report_to_header:
 
         @app.after_request
@@ -355,7 +380,7 @@ def create_app():
         """Attach the authenticated user to the request context."""
         g.user = None
         if request.path.startswith(
-            ("/static/", "/auth/", "/favicon.ico", "/robots.txt")
+            ("/static/", "/auth/", "/favicon.ico", "/robots.txt", "/tasks/")
         ):
             return
 
@@ -399,6 +424,22 @@ def create_app():
         except FileNotFoundError:
             return ("", 204)
 
+    @app.route("/robots.txt")
+    def robots_txt():
+        static_dir = os.path.join(app.root_path, "static")
+        try:
+            return send_from_directory(
+                static_dir,
+                "robots.txt",
+                mimetype="text/plain",
+                max_age=60 * 60,
+            )
+        except FileNotFoundError:
+            response = app.response_class(
+                "User-agent: *\nDisallow:\n", mimetype="text/plain"
+            )
+            return response
+
     @app.route("/wp-admin/<path:_>")
     @app.route("/wordpress/<path:_>")
     @app.route("/xmlrpc.php")
@@ -438,7 +479,10 @@ def create_app():
 
     def internal_server_error(e):
         logger = logging.getLogger(__name__)
-        logger.error("An internal server error occurred", exc_info=True)
+        # Log the full traceback as a string for better visibility in logs
+        logger.error("An internal server error occurred: %s", e, exc_info=True)
+        full_traceback = traceback.format_exc()
+        logger.error("Full traceback:\n%s", full_traceback)
         # Note: we set the status code explicitly
         return render_template("500.html", error_message=str(e)), 500
 

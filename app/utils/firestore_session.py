@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from flask.sessions import SessionInterface, SessionMixin
+from flask.sessions import (
+    SessionInterface,
+    SessionMixin,
+    SecureCookieSessionInterface,
+)
 from google.cloud import firestore
+from google.api_core.exceptions import Forbidden
 from werkzeug.datastructures import CallbackDict
 
 
@@ -23,19 +28,36 @@ class FirestoreSession(CallbackDict, SessionMixin):
 class FirestoreSessionInterface(SessionInterface):
     session_class = FirestoreSession
 
-    def __init__(self, db: firestore.Client, collection: str):
+    def __init__(self, db: firestore.Client | None, collection: str):
         self.db = db
         self.collection = collection
+        self._fallback_interface = SecureCookieSessionInterface()
+        self._warned_missing_db = False
 
     def open_session(self, app, request):
+        if self.db is None:
+            if not self._warned_missing_db:
+                app.logger.warning(
+                    "Firestore session backend unavailable; using secure cookie sessions."
+                )
+                self._warned_missing_db = True
+            return self._fallback_interface.open_session(app, request)
+
         cookie_name = app.config.get("SESSION_COOKIE_NAME", "flask_session")
         sid = request.cookies.get(cookie_name)
         if not sid:
             sid = str(uuid.uuid4())
             return self.session_class(sid=sid, new=True)
 
-        doc_ref = self.db.collection(self.collection).document(sid)
-        doc = doc_ref.get()
+        try:
+            doc_ref = self.db.collection(self.collection).document(sid)
+            doc = doc_ref.get()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            app.logger.exception(
+                "Failed to load session %s from Firestore; falling back to secure cookie.",
+                sid,
+            )
+            return self._fallback_interface.open_session(app, request)
 
         if doc.exists:
             data = doc.to_dict() or {}
@@ -53,6 +75,10 @@ class FirestoreSessionInterface(SessionInterface):
         return self.session_class(sid=sid, new=True)
 
     def save_session(self, app, session, response):
+        if not isinstance(session, self.session_class) or self.db is None:
+            self._fallback_interface.save_session(app, session, response)
+            return
+
         domain = self.get_cookie_domain(app)
         cookie_name = app.config.get("SESSION_COOKIE_NAME", "flask_session")
         if not session:
@@ -65,7 +91,23 @@ class FirestoreSessionInterface(SessionInterface):
                 datetime.now(timezone.utc) + app.permanent_session_lifetime
             )
             doc_ref = self.db.collection(self.collection).document(session.sid)
-            doc_ref.set(session_data)
+            try:
+                doc_ref.set(session_data, timeout=30)
+            except Forbidden as exc:
+                app.logger.error(
+                    "Firestore denied session write for %s: %s. Verify the Cloud Run service account has the roles/datastore.user permission.",
+                    session.sid,
+                    exc,
+                )
+                self._fallback_interface.save_session(app, session, response)
+                return
+            except Exception as exc:  # pragma: no cover - defensive logging
+                app.logger.exception(
+                    "Failed to persist session %s to Firestore; falling back to secure cookie.",
+                    session.sid,
+                )
+                self._fallback_interface.save_session(app, session, response)
+                return
 
         response.set_cookie(
             cookie_name,

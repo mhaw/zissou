@@ -306,6 +306,8 @@ def create_item(item: Item, user_id: str) -> str:
         if item.reading_time is not None:
             item_data["reading_time"] = item.reading_time
 
+        item_ref.set(item_data)
+
         clear_cached_functions(
             get_item, list_items, find_item_by_source_url, get_all_unique_tags  # type: ignore[arg-type]
         )

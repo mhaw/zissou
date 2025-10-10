@@ -3,6 +3,16 @@
         return;
     }
 
+    const CSRF_META_SELECTOR = 'meta[name="csrf-token"]';
+
+    function getCsrfToken() {
+        if (window.Zissou && typeof window.Zissou.getCsrfToken === 'function') {
+            return window.Zissou.getCsrfToken();
+        }
+        const meta = document.querySelector(CSRF_META_SELECTOR);
+        return meta ? meta.getAttribute('content') : '';
+    }
+
     function updateStatus(element, message, state) {
         if (!element) {
             return;
@@ -375,10 +385,12 @@
         fetch(endpoint, {
             method: 'POST',
             headers: {
+                'X-CSRFToken': getCsrfToken(),
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
+            credentials: 'include',
             body: JSON.stringify({ tags: previousTags })
         }).then((response) => {
             if (!response.ok) {

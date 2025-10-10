@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/
 # Set up virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+ENV GRPC_VERBOSITY=ERROR
 
 # Copy requirements and install dependencies
 COPY requirements.txt .

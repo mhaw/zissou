@@ -69,7 +69,9 @@ def get_bucket_by_slug(slug: str) -> Bucket | None:
     _require_db()
     try:
         buckets_ref = db.collection(BUCKETS_COLLECTION)
-        query = buckets_ref.where("slug", "==", slug).limit(1)
+        query = buckets_ref.where(
+            filter=firestore.FieldFilter("slug", "==", slug)
+        ).limit(1)
         docs = list(query.stream())
         if not docs:
             return None

@@ -1,12 +1,16 @@
+import inspect
+import json
 import logging
 import os
 import re
-import inspect
+import time
 from collections import Counter
-from typing import Callable, Optional, Tuple, Any
 from dataclasses import dataclass
+from typing import Any, Callable, Iterable, Optional, Tuple
+from urllib.parse import urlparse
 
 import trafilatura
+from cachetools import TTLCache
 
 try:
     from bs4 import BeautifulSoup
@@ -22,11 +26,21 @@ except (
     Config: Optional[type] = None  # type: ignore[assignment]
 
 try:
+    from goose3 import Goose
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    Goose = None  # type: ignore[assignment]
+
+try:
     from readability import Document
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     Document = None  # type: ignore[assignment]
 
 from trafilatura.settings import use_config  # type: ignore[import-untyped]
+
+try:
+    from trafilatura.settings import use_browser_config  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover - optional in older versions
+    use_browser_config = None  # type: ignore[assignment]
 
 from app.utils.text_cleaner import clean_text
 from app.services.fetch import (
@@ -36,8 +50,9 @@ from app.services.fetch import (
     fetch_with_playwright,
     hybrid_fetch_attempts,
     is_likely_truncated,
-    recover_truncated_content,
 )
+from app.services.archive_utils import recover_truncated_content
+from app.services.exceptions import ParseError, TruncatedError
 
 
 def calculate_reading_time(text: str, words_per_minute: int = 200) -> int:
@@ -64,6 +79,10 @@ HEURISTIC_SKIP_PHRASES = [
     if phrase.strip()
 ]
 PLAINTEXT_MIN_TOTAL_CHARS = int(os.getenv("PLAINTEXT_MIN_TOTAL_CHARS", "280"))
+FALLBACK_MIN_LENGTH = int(os.getenv("FALLBACK_MIN_LENGTH", "1500"))
+DOMAIN_PREFERENCE_TTL_SECONDS = int(
+    os.getenv("EXTRACTOR_DOMAIN_PREFERENCE_TTL_SECONDS", str(6 * 60 * 60))
+)
 
 _ENGINE_ATTEMPTS: Counter[str] = Counter()
 _ENGINE_SUCCESSES: Counter[str] = Counter()
@@ -73,10 +92,27 @@ _ENGINE_WINS: Counter[str] = Counter()
 ENGINE_PIPELINE_ORDER: Tuple[str, ...] = (
     "trafilatura",
     "newspaper3k",
+    "goose3",
     "readability",
     "soup_heuristic",
     "plaintext_fallback",
 )
+ARCHIVE_SKIP_PARSERS = {"trafilatura", "newspaper3k"}
+
+_DOMAIN_EXTRACTOR_OVERRIDES: dict[str, Tuple[str, ...]] = {
+    "nytimes.com": ("trafilatura", "newspaper3k", "goose3", "readability"),
+    "theguardian.com": ("newspaper3k", "trafilatura", "goose3", "readability"),
+    "theatlantic.com": ("trafilatura", "goose3", "newspaper3k", "readability"),
+    "newyorker.com": ("trafilatura", "goose3", "readability", "newspaper3k"),
+    "wired.com": ("newspaper3k", "trafilatura", "goose3", "readability"),
+}
+
+_DOMAIN_SUCCESS_CACHE: TTLCache[str, str] = TTLCache(
+    maxsize=int(os.getenv("EXTRACTOR_DOMAIN_CACHE_SIZE", "256")),
+    ttl=DOMAIN_PREFERENCE_TTL_SECONDS,
+)
+
+_EXTRACTOR_FUNCTIONS: dict[str, ExtractorFn] = {}
 
 
 @dataclass
@@ -162,6 +198,84 @@ def get_extractor_metrics() -> dict:
     return _build_metrics_snapshot(None)
 
 
+def _get_extractor_functions() -> dict[str, ExtractorFn]:
+    if not _EXTRACTOR_FUNCTIONS:
+        _EXTRACTOR_FUNCTIONS.update(
+            {
+                "trafilatura": _extract_with_trafilatura,
+                "newspaper3k": _extract_with_newspaper,
+                "goose3": _extract_with_goose,
+                "readability": _extract_with_readability,
+                "soup_heuristic": _extract_with_soup_heuristic,
+                "plaintext_fallback": _extract_with_plaintext,
+            }
+        )
+    return _EXTRACTOR_FUNCTIONS
+
+
+def _normalise_domain(url: str) -> str:
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return domain
+
+
+def _domain_override_for(domain: str) -> Optional[Tuple[str, ...]]:
+    if domain in _DOMAIN_EXTRACTOR_OVERRIDES:
+        return _DOMAIN_EXTRACTOR_OVERRIDES[domain]
+    for key, value in _DOMAIN_EXTRACTOR_OVERRIDES.items():
+        if domain.endswith(key):
+            return value
+    return None
+
+
+def _merge_pipeline_order(priority: Iterable[str], base: Iterable[str]) -> list[str]:
+    functions = _get_extractor_functions()
+    seen: set[str] = set()
+    merged: list[str] = []
+    for name in list(priority) + list(base):
+        if name not in functions:
+            continue
+        if name in seen:
+            continue
+        merged.append(name)
+        seen.add(name)
+    return merged
+
+
+def _build_pipeline_for(url: str) -> Tuple[Tuple[str, ExtractorFn], ...]:
+    domain = _normalise_domain(url)
+    base_order = list(ENGINE_PIPELINE_ORDER)
+    override = _domain_override_for(domain)
+    if override:
+        base_order = _merge_pipeline_order(override, base_order)
+    last_success = _DOMAIN_SUCCESS_CACHE.get(domain)
+    if last_success:
+        base_order = _merge_pipeline_order((last_success,), base_order)
+
+    functions = _get_extractor_functions()
+    pipeline: list[tuple[str, ExtractorFn]] = []
+    for name in base_order:
+        extractor = functions.get(name)
+        if extractor:
+            pipeline.append((name, extractor))
+    return tuple(pipeline)
+
+
+def _remember_domain_success(domain: str, extractor: Optional[str]) -> None:
+    if not domain or not extractor:
+        return
+    _DOMAIN_SUCCESS_CACHE[domain] = extractor
+
+
+def _log_extractor_event(payload: dict[str, Any]) -> None:
+    try:
+        logger.info("%s", json.dumps(payload, separators=(",", ":")))
+    except TypeError:  # pragma: no cover - fallback if payload not JSON serialisable
+        logger.info("extractor_event %s", payload)
+
+
 def extract_text(url: str) -> dict:
     """Extract the main article content with resilient fetching and recovery."""
     use_playwright = os.getenv("ENABLE_PLAYWRIGHT", "false").lower() in (
@@ -187,23 +301,59 @@ def extract_text(url: str) -> dict:
 
     parsed.setdefault("fetched_via", "playwright" if use_playwright else "direct")
 
-    if is_likely_truncated(parsed.get("text")):
-        baseline_length = len((parsed.get("text") or "").strip())
-        hybrid = _attempt_hybrid_refetch(
-            resolved_url or url,
-            origin_url=url,
-            baseline_length=baseline_length,
+    text = (parsed.get("text") or "").strip()
+    parser_name = parsed.get("parser")
+    text_length = len(text)
+
+    if parser_name in ARCHIVE_SKIP_PARSERS and text_length >= FALLBACK_MIN_LENGTH:
+        parsed["archive_attempted"] = False
+        return parsed
+
+    if not is_likely_truncated(text):
+        parsed["archive_attempted"] = False
+        return parsed
+
+    baseline_length = text_length
+    _log_extractor_event(
+        {
+            "event": "content_truncated",
+            "url": resolved_url or url,
+            "domain": _normalise_domain(resolved_url or url),
+            "parser": parser_name,
+            "chars": baseline_length,
+            "error_type": TruncatedError.__name__,
+        }
+    )
+    parsed["archive_attempted"] = True
+
+    hybrid = _attempt_hybrid_refetch(
+        resolved_url or url,
+        origin_url=url,
+        baseline_length=baseline_length,
+    )
+    if hybrid:
+        hybrid["archive_attempted"] = False
+        _log_extractor_event(
+            {
+                "event": "hybrid_retry_success",
+                "url": resolved_url or url,
+                "domain": _normalise_domain(resolved_url or url),
+                "parser": hybrid.get("parser"),
+                "chars": len((hybrid.get("text") or "").strip()),
+            }
         )
-        if hybrid:
-            return hybrid
-        recovered = recover_truncated_content(
-            url,
-            parsed.get("text"),
-            extractor=_process_html,
-            fetcher=lambda target: fetch_with_resilience(target, user_agent=USER_AGENT),
-        )
-        if recovered:
-            return recovered
+        return hybrid
+
+    recovered = recover_truncated_content(
+        url,
+        parsed.get("text"),
+        extractor=_process_html,
+        fetcher=lambda target: fetch_with_resilience(target, user_agent=USER_AGENT),
+        is_truncated=is_likely_truncated,
+    )
+    if recovered:
+        recovered["archive_attempted"] = True
+        return recovered
 
     return parsed
 
@@ -212,73 +362,126 @@ def _process_html(
     html: str, origin_url: str, resolved_url: Optional[str] = None
 ) -> dict:
     target_url = resolved_url or origin_url
+    domain = _normalise_domain(target_url)
     errors: list[str] = []
     best_result: Optional[dict] = None
     best_length = 0
+    best_truncated = False
     winning_engine: Optional[str] = None
 
-    pipeline: Tuple[Tuple[str, ExtractorFn], ...] = (
-        ("trafilatura", _extract_with_trafilatura),
-        ("newspaper3k", _extract_with_newspaper),
-        ("readability", _extract_with_readability),
-        ("soup_heuristic", _extract_with_soup_heuristic),
-        ("plaintext_fallback", _extract_with_plaintext),
-    )
+    pipeline = _build_pipeline_for(target_url)
+    pipeline_attempts: list[dict[str, Any]] = []
 
     for engine_name, extractor in pipeline:
         _record_attempt(engine_name)
+        attempt_started = time.perf_counter()
+        attempt_entry: dict[str, Any] = {
+            "engine": engine_name,
+        }
+        pipeline_attempts.append(attempt_entry)
         try:
             result = extractor(target_url, html, source_url=origin_url)
         except Exception as exc:  # pragma: no cover - defensive guard
-            logger.warning(
-                "Extractor %s raised for %s: %s",
-                engine_name,
-                target_url,
-                exc,
-            )
+            elapsed_ms = int((time.perf_counter() - attempt_started) * 1000)
             _record_failure(engine_name)
             errors.append(f"{engine_name}: {exc}")
+            attempt_entry.update(
+                status="exception",
+                error_type=exc.__class__.__name__,
+                elapsed_ms=elapsed_ms,
+            )
             continue
+
+        elapsed_ms = int((time.perf_counter() - attempt_started) * 1000)
 
         if result.get("error"):
             _record_failure(engine_name)
-            errors.append(f"{engine_name}: {result['error']}")
+            error_message = str(result["error"])
+            errors.append(f"{engine_name}: {error_message}")
+            attempt_entry.update(
+                status="error",
+                error_type=ParseError.__name__,
+                elapsed_ms=elapsed_ms,
+            )
             continue
 
         text = (result.get("text") or "").strip()
         text_length = len(text)
+        truncated = is_likely_truncated(text) if text_length else False
 
-        if text_length >= ENGINE_SUCCESS_THRESHOLD:
+        if text_length >= ENGINE_SUCCESS_THRESHOLD and not truncated:
             _record_success(engine_name)
-        else:
-            _record_failure(engine_name)
+            attempt_entry.update(
+                status="success",
+                chars=text_length,
+                truncated=False,
+                elapsed_ms=elapsed_ms,
+            )
+            best_result = result
+            best_length = text_length
+            best_truncated = False
+            winning_engine = result.get("parser") or engine_name
+            break
 
-        if not text_length:
+        _record_failure(engine_name)
+
+        if text_length == 0:
+            status = "empty"
+        elif truncated:
+            status = "truncated"
+        elif text_length >= ENGINE_SUCCESS_THRESHOLD:
+            status = "ok"
+        else:
+            status = "short"
+
+        attempt_entry.update(
+            status=status,
+            chars=text_length,
+            truncated=truncated if text_length else None,
+            elapsed_ms=elapsed_ms,
+        )
+
+        if text_length == 0:
             continue
 
         if text_length > best_length:
             best_result = result
             best_length = text_length
+            best_truncated = truncated
             winning_engine = result.get("parser") or engine_name
 
     if best_result and winning_engine:
-        metrics_winner = (
-            winning_engine if best_length >= ENGINE_SUCCESS_THRESHOLD else None
+        full_success = (
+            best_length >= ENGINE_SUCCESS_THRESHOLD and not best_truncated
         )
-        if metrics_winner:
+        metrics_winner = winning_engine if full_success else None
+        pipeline_status = "success" if full_success else "fallback"
+        _log_extractor_event(
+            {
+                "event": "extractor_pipeline",
+                "url": target_url,
+                "domain": domain,
+                "status": pipeline_status,
+                "winner": winning_engine,
+                "winner_chars": best_length,
+                "attempts": pipeline_attempts,
+            }
+        )
+        if full_success:
             _record_win(winning_engine)
+            _remember_domain_success(domain, winning_engine)
             logger.info(
-                "Extractor %s won for %s with %s characters",
+                "Extractor %s succeeded for %s (%s chars)",
                 winning_engine,
                 target_url,
                 best_length,
             )
         else:
-            logger.warning(
-                "Extractor %s produced %s characters for %s (below threshold)",
+            logger.info(
+                "Extractor pipeline fallback for %s via %s (%s chars)",
+                target_url,
                 winning_engine,
                 best_length,
-                target_url,
             )
 
         best_result.setdefault("parser", winning_engine)
@@ -294,6 +497,16 @@ def _process_html(
 
     error_message = errors[0] if errors else "No extractor produced text."
     logger.error("Extraction pipeline failed for %s: %s", target_url, error_message)
+    _log_extractor_event(
+        {
+            "event": "extractor_pipeline",
+            "url": target_url,
+            "domain": domain,
+            "status": "failure",
+            "attempts": pipeline_attempts,
+            "error_message": error_message,
+        }
+    )
     return {
         "error": error_message,
         "resolved_url": target_url,
@@ -394,19 +607,25 @@ def _collect_paragraphs(soup) -> list[str]:
 
     seen_text: set[str] = set()
     for container in containers:
-        for node in container.find_all("p"):
+        for node in container.find_all(["h1", "h2", "h3", "p", "li"]):
             text = node.get_text(" ", strip=True)
             if not text:
                 continue
             lowered = text.lower()
-            if len(text) < HEURISTIC_MIN_PARAGRAPH_CHARS:
+            if node.name in {"h1", "h2", "h3"}:
+                candidate = f"## {text}"
+            elif node.name == "li":
+                candidate = f"- {text}"
+            else:
+                if len(text) < HEURISTIC_MIN_PARAGRAPH_CHARS:
+                    continue
+                if any(skip in lowered for skip in HEURISTIC_SKIP_PHRASES):
+                    continue
+                candidate = text
+            if candidate in seen_text:
                 continue
-            if any(skip in lowered for skip in HEURISTIC_SKIP_PHRASES):
-                continue
-            if text in seen_text:
-                continue
-            paragraphs.append(text)
-            seen_text.add(text)
+            paragraphs.append(candidate)
+            seen_text.add(candidate)
 
     return paragraphs
 
@@ -605,10 +824,23 @@ def _extract_with_newspaper(
     config = Config()
     config.browser_user_agent = USER_AGENT
     config.request_timeout = REQUEST_TIMEOUT_SECONDS
+    config.memoize_articles = False
+    config.fetch_images = False
+    config.keep_article_html = True
+    config.follow_meta_refresh = True
+    config.use_meta_language = True
 
     article = Article(url, config=config)
     article.set_html(html)
-    article.parse()
+    article.download_state = 2  # type: ignore[attr-defined]
+    try:
+        article.parse()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return {
+            "error": f"Newspaper failed to parse HTML: {exc}",
+            "resolved_url": url,
+            "source_url": source_url or url,
+        }
 
     if not article.text:
         return {
@@ -617,10 +849,12 @@ def _extract_with_newspaper(
             "source_url": source_url or url,
         }
 
+    cleaned_text = clean_text(article.text)
+
     return {
         "title": article.title if article.title else "Untitled",
         "author": article.authors[0] if article.authors else "Unknown",
-        "text": clean_text(article.text),
+        "text": cleaned_text,
         "source_url": source_url or url,
         "resolved_url": url,
         "published_date": (
@@ -631,12 +865,81 @@ def _extract_with_newspaper(
     }
 
 
+def _extract_with_goose(
+    url: str, html: Optional[str], source_url: Optional[str] = None
+) -> dict:
+    """Optional Goose3 extractor to handle stubborn layouts."""
+    if Goose is None:
+        return {
+            "error": "Goose3 is not installed.",
+            "resolved_url": url,
+            "source_url": source_url or url,
+        }
+
+    config = {
+        "browser_user_agent": USER_AGENT,
+        "http_timeout": REQUEST_TIMEOUT_SECONDS,
+        "enable_image_fetching": False,
+    }
+
+    goose = Goose(config)
+    try:
+        article = goose.extract(raw_html=html, url=url)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return {
+            "error": f"Goose3 extraction failed: {exc}",
+            "resolved_url": url,
+            "source_url": source_url or url,
+        }
+    finally:
+        try:
+            goose.close()
+        except AttributeError:
+            pass
+
+    text = getattr(article, "cleaned_text", "") or ""
+    cleaned_text = clean_text(text)
+    if not cleaned_text:
+        return {
+            "error": "Goose3 returned empty content.",
+            "resolved_url": url,
+            "source_url": source_url or url,
+        }
+
+    authors = getattr(article, "authors", []) or []
+    if isinstance(authors, str):
+        authors = [authors]
+
+    publish_date = getattr(article, "publish_date", None)
+    if hasattr(publish_date, "isoformat"):
+        publish_value = publish_date.isoformat()
+    else:
+        publish_value = publish_date if isinstance(publish_date, str) else None
+
+    return {
+        "title": getattr(article, "title", None) or "Untitled",
+        "author": authors[0] if authors else "Unknown",
+        "text": cleaned_text,
+        "source_url": source_url or url,
+        "resolved_url": url,
+        "published_date": publish_value,
+        "image_url": getattr(article, "top_image", None),
+        "parser": "goose3",
+    }
+
+
 def _extract_with_trafilatura(
     url: str, html: Optional[str], source_url: Optional[str] = None
 ) -> dict:
     """Fallback extraction using trafilatura."""
-    config = use_config()
+    config = (
+        use_browser_config()  # type: ignore[operator]
+        if callable(use_browser_config)
+        else use_config()
+    )
     config.set("DEFAULT", "EXTRACTION_TIMEOUT", "0")
+    config.set("DEFAULT", "STRICT_META", "0")
+    config.set("DEFAULT", "URL", url)
     config.set("DEFAULT", "USER_AGENT", USER_AGENT)
 
     if not html:
@@ -651,13 +954,23 @@ def _extract_with_trafilatura(
             "source_url": source_url or url,
         }
 
-    text = trafilatura.extract(
-        downloaded,
-        include_comments=False,
-        include_tables=False,
-        config=config,
-        output_format="txt",
-    )
+    try:
+        text = trafilatura.extract(
+            downloaded,
+            include_comments=False,
+            include_tables=False,
+            include_images=False,
+            favor_precision=True,
+            no_fallback=False,
+            config=config,
+            output_format="txt",
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return {
+            "error": f"Trafilatura extraction raised an exception: {exc}",
+            "resolved_url": url,
+            "source_url": source_url or url,
+        }
 
     if not text:
         return {
@@ -668,7 +981,6 @@ def _extract_with_trafilatura(
 
     text = clean_text(text)
 
-    config.set("DEFAULT", "URL", url)
     metadata = _extract_trafilatura_metadata(downloaded, url, config)
 
     metadata_title = metadata.title if metadata and hasattr(metadata, "title") else None

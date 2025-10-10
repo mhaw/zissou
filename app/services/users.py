@@ -65,9 +65,8 @@ def get_or_create_user(transaction, decoded_token: dict) -> tuple[User, bool]:
         if snapshot.exists:
             return User.from_dict(snapshot.id, snapshot.to_dict()), False
 
-        # Determine role for new user
-        admin_emails = current_app.config.get("ADMIN_EMAILS", [])
-        role = "admin" if email in admin_emails else "member"
+        # New users always start as 'member'. Admin status can be granted later.
+        role = "member"
 
         new_user = User(
             id=uid,
@@ -151,7 +150,7 @@ def get_recent_user_count(hours: int = 24) -> int:
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         users_ref = db.collection(os.getenv("FIRESTORE_COLLECTION_USERS", "users"))
-        query = users_ref.where("createdAt", ">=", cutoff)
+        query = users_ref.where(filter=firestore.FieldFilter("createdAt", ">=", cutoff))
         return _run_count(query)
     except (GoogleCloudError, ValueError) as e:
         logger.error(f"Firestore error getting recent user count: {e}", exc_info=True)

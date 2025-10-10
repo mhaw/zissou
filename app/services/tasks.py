@@ -6,6 +6,7 @@ from typing import Optional, Any
 
 from google.cloud import firestore  # type: ignore[attr-defined]
 from google.cloud.exceptions import GoogleCloudError
+from google.cloud.firestore_v1 import FieldFilter
 from google.cloud.tasks_v2 import CloudTasksClient
 
 from app.models.task import Task
@@ -65,6 +66,16 @@ STALE_THRESHOLDS = {
 RETRYABLE_STATUSES = {"FAILED", "QUEUED"}
 STATUS_COUNT_DEFAULTS = ["QUEUED", "PROCESSING", "FAILED", "COMPLETED"]
 RECENT_ACTIVITY_DEFAULTS = ["COMPLETED", "FAILED", "QUEUED"]
+OPEN_TASK_STATUSES = {
+    "QUEUED",
+    "VALIDATING_INPUT",
+    "CHECKING_EXISTING",
+    "PARSING",
+    "CONVERTING_AUDIO",
+    "UPLOADING_AUDIO",
+    "SAVING_ITEM",
+    "PROCESSING",
+}
 
 
 def _ensure_db_client():
@@ -165,7 +176,38 @@ def create_task(
                 if isinstance(user, dict)
                 else getattr(user, "uid", None)
             )
-        task_ref = db.collection(TASKS_COLLECTION).document()
+
+        tasks_ref = db.collection(TASKS_COLLECTION)
+        try:
+            potential_duplicates = (
+                tasks_ref.where(filter=FieldFilter("sourceUrl", "==", url))
+                .order_by("createdAt", direction=firestore.Query.DESCENDING)
+                .limit(5)
+                .stream()
+            )
+        except GoogleCloudError as exc:
+            logger.warning("Failed to check for duplicate tasks on %s: %s", url, exc)
+            potential_duplicates = []
+
+        for duplicate in potential_duplicates:
+            candidate = duplicate.to_dict() or {}
+            status = candidate.get("status")
+            candidate_voice = candidate.get("voice")
+            candidate_bucket = candidate.get("bucket_id")
+            if status not in OPEN_TASK_STATUSES:
+                continue
+            if voice and candidate_voice and candidate_voice != voice:
+                continue
+            if bucket_id and candidate_bucket and candidate_bucket != bucket_id:
+                continue
+            logger.info(
+                "Reusing active task %s for %s instead of enqueuing duplicate",
+                duplicate.id,
+                url,
+            )
+            return duplicate.id
+
+        task_ref = tasks_ref.document()
         task.id = task_ref.id
 
         # Local development: process synchronously
@@ -287,7 +329,7 @@ def get_task_by_source_url(source_url: str) -> Task | None:
     try:
         tasks_ref = db.collection(TASKS_COLLECTION)
         query = (
-            tasks_ref.where("sourceUrl", "==", source_url)
+            tasks_ref.where(filter=firestore.FieldFilter("sourceUrl", "==", source_url))
             .order_by("createdAt", direction=firestore.Query.DESCENDING)
             .limit(1)
         )
@@ -364,6 +406,29 @@ def _doc_to_task(doc) -> Task:
     return Task.from_dict(doc.id, doc.to_dict())
 
 
+def _build_index_hint(
+    status: str | None,
+    search_query: str | None,
+    sort_field: str,
+    sort_direction,
+) -> dict:
+    """Construct the composite index definition required for the current query."""
+    fields: list[dict[str, str]] = []
+    if search_query:
+        fields.append({"fieldPath": "sourceUrl", "order": "ASCENDING"})
+    if status:
+        fields.append({"fieldPath": "status", "order": "ASCENDING"})
+
+    direction = "DESCENDING" if sort_direction == firestore.Query.DESCENDING else "ASCENDING"
+    fields.append({"fieldPath": sort_field, "order": direction})
+
+    return {
+        "collectionGroup": TASKS_COLLECTION,
+        "queryScope": "COLLECTION",
+        "fields": fields,
+    }
+
+
 def list_tasks(
     sort: str = "-createdAt",
     after: Optional[str] = None,
@@ -373,20 +438,20 @@ def list_tasks(
 ) -> tuple[list[Task], str | None]:
     """Return tasks sorted by the requested field along with a pagination cursor."""
     _ensure_db_client()
+    sort_field = sort.lstrip("-")
+    sort_direction = (
+        firestore.Query.DESCENDING if sort.startswith("-") else firestore.Query.ASCENDING
+    )
     try:
         tasks_ref = db.collection(TASKS_COLLECTION)
         query = tasks_ref
         if status:
-            query = query.where("status", "==", status)
+            query = query.where(filter=firestore.FieldFilter("status", "==", status))
         if search_query:
-            query = query.where("sourceUrl", "==", search_query)
+            query = query.where(
+                filter=firestore.FieldFilter("sourceUrl", "==", search_query)
+            )
 
-        sort_direction = (
-            firestore.Query.DESCENDING
-            if sort.startswith("-")
-            else firestore.Query.ASCENDING
-        )
-        sort_field = sort.lstrip("-")
         query = query.order_by(sort_field, direction=sort_direction)
 
         if after:
@@ -406,6 +471,13 @@ def list_tasks(
 
     except GoogleCloudError as e:
         logger.error(f"Firestore error listing tasks: {e}")
+        message = str(e).lower()
+        if "index" in message or "indexes" in message:
+            hint = _build_index_hint(status, search_query, sort_field, sort_direction)
+            logger.error(
+                "Composite index required for tasks query: %s",
+                json.dumps(hint),
+            )
         raise FirestoreError("Failed to list tasks from Firestore.") from e
 
 
@@ -414,7 +486,9 @@ def query_tasks(status: str, limit: int = 10) -> list[Task]:
     _ensure_db_client()
     try:
         tasks_ref = db.collection(TASKS_COLLECTION)
-        query = tasks_ref.where("status", "==", status).limit(limit)
+        query = tasks_ref.where(
+            filter=firestore.FieldFilter("status", "==", status)
+        ).limit(limit)
         docs = query.stream()
         return [_doc_to_task(doc) for doc in docs]
     except GoogleCloudError as e:
@@ -429,7 +503,9 @@ def get_status_counts(statuses: list[str] | None = None) -> dict[str, int]:
     status_list = statuses or STATUS_COUNT_DEFAULTS
     counts: dict[str, int] = {}
     for status_name in status_list:
-        query = tasks_ref.where("status", "==", status_name)
+        query = tasks_ref.where(
+            filter=firestore.FieldFilter("status", "==", status_name)
+        )
         counts[status_name] = _run_count(query)
     counts["TOTAL"] = sum(counts.values())
     return counts
@@ -445,9 +521,9 @@ def get_recent_activity(
     status_list = statuses or RECENT_ACTIVITY_DEFAULTS
     counts: dict[str, int] = {}
     for status_name in status_list:
-        query = tasks_ref.where("status", "==", status_name).where(
-            "updatedAt", ">=", cutoff
-        )
+        query = tasks_ref.where(
+            filter=firestore.FieldFilter("status", "==", status_name)
+        ).where(filter=firestore.FieldFilter("updatedAt", ">=", cutoff))
         counts[status_name] = _run_count(query)
     return {"cutoff": cutoff, "counts": counts}
 
@@ -457,7 +533,11 @@ def detach_item_from_tasks(item_id: str) -> int:
     _ensure_db_client()
     tasks_ref = db.collection(TASKS_COLLECTION)
     try:
-        docs = list(tasks_ref.where("item_id", "==", item_id).stream())
+        docs = list(
+            tasks_ref.where(
+                filter=firestore.FieldFilter("item_id", "==", item_id)
+            ).stream()
+        )
         updated = 0
         for doc in docs:
             tasks_ref.document(doc.id).update(

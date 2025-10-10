@@ -43,12 +43,20 @@ section() {
 
 section "Initializing deploy"
 
-if [ -f .env ]; then
+if [ -f .env.prod ]; then
+    log "Loading environment variables from .env.prod"
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env.prod
+    set +a
+elif [ -f .env ]; then
     log "Loading environment variables from .env"
     set -a
     # shellcheck disable=SC1091
     . ./.env
     set +a
+    log "DEBUG: GCP_PROJECT_ID after sourcing .env: ${GCP_PROJECT_ID}"
+    log "DEBUG: GCP_REGION after sourcing .env: ${GCP_REGION}"
 else
     log ".env file not found; relying on ambient environment"
 fi
@@ -81,12 +89,12 @@ fi
 SERVICE_NAME=${SERVICE_NAME:-$APP_NAME_SLUG}
 : "${TTS_VOICE:=}"
 : "${SERVICE_URL:=}"
-: "${CLOUD_RUN_MEMORY:=512Mi}"
-: "${CLOUD_RUN_CPU:=1}"
+: "${CLOUD_RUN_MEMORY:=1024Mi}"
+: "${CLOUD_RUN_CPU:=2}"
 : "${CLOUD_RUN_MAX_INSTANCES:=5}"
 : "${CLOUD_RUN_MIN_INSTANCES:=0}"
-: "${CLOUD_RUN_CONCURRENCY:=80}"
-: "${CLOUD_RUN_TIMEOUT:=300}"
+: "${CLOUD_RUN_CONCURRENCY:=40}"
+: "${CLOUD_RUN_TIMEOUT:=480}"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     GIT_SHA=${GIT_SHA:-$(git rev-parse --short HEAD)}
@@ -152,13 +160,18 @@ gcloud auth configure-docker "$REGISTRY_HOST" --quiet
 section "Building container image"
 export DOCKER_BUILDKIT=${DOCKER_BUILDKIT:-1}
 export BUILDKIT_PROGRESS=${BUILDKIT_PROGRESS:-plain}
-log "Building image $IMAGE_TAG"
-docker build --platform linux/amd64 --no-cache -t "$IMAGE_TAG" .
-docker tag "$IMAGE_TAG" "$LATEST_TAG"
 
-log "Pushing image tags"
-docker push "$IMAGE_TAG"
-docker push "$LATEST_TAG"
+if [ "${SKIP_BUILD:-false}" = "true" ]; then
+    log "SKIP_BUILD is true, skipping Docker image build and push."
+else
+    log "Building image $IMAGE_TAG"
+    docker build --platform linux/amd64 -t "$IMAGE_TAG" .
+    docker tag "$IMAGE_TAG" "$LATEST_TAG"
+
+    log "Pushing image tags"
+    docker push "$IMAGE_TAG"
+    docker push "$LATEST_TAG"
+fi
 
 section "Preparing runtime configuration"
 ENV_FILE=$(/usr/bin/mktemp -t zissou-prod-env.XXXX.yaml)
@@ -197,6 +210,7 @@ write_env_entry "FIREBASE_WEB_API_KEY" "$FIREBASE_WEB_API_KEY"
 write_env_entry "FIREBASE_AUTH_DOMAIN" "$FIREBASE_AUTH_DOMAIN"
 write_env_entry "FLASK_SESSION_COOKIE_SECURE" "$FLASK_SESSION_COOKIE_SECURE"
 write_env_entry "FLASK_SESSION_COOKIE_NAME" "$FLASK_SESSION_COOKIE_NAME"
+write_env_entry "ALLOWED_ORIGINS" "$ALLOWED_ORIGINS"
 
 section "Deploying to Cloud Run"
 DEPLOY_CMD=(
@@ -230,7 +244,7 @@ section "Configuring health checks"
 gcloud run services update "$SERVICE_NAME" \
     --project="$GCP_PROJECT_ID" \
     --region="$GCP_REGION" \
-    --liveness-probe=request-path=/health,initial-delay=30 \
+    --update-liveness-probe=http-path=/health,initial-delay-seconds=30 \
     --quiet
 
 section "Post-deploy steps"

@@ -6,6 +6,7 @@
 <div class="max-w-xl mx-auto bg-white p-8 rounded-lg shadow-md">
     <h1 class="text-2xl font-bold mb-6 text-center">Bulk Import Articles</h1>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-4">
             <label for="urls_text" class="block text-gray-700 text-sm font-bold mb-2">URLs (one per line):</label>
             <textarea name="urls_text" id="urls_text" rows="10" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="https://www.example.com/article1\nhttps://www.example.com/article2"></textarea>

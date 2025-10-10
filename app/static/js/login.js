@@ -7,7 +7,6 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
   getIdToken,
-  fetchSignInMethodsForEmail,
   sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -28,20 +27,21 @@ const auth = getAuth(app);
 auth.useDeviceLanguage();
 
 // --- DOM Elements ---
-const form = document.getElementById("auth-form");
-const emailInput = document.getElementById("email");
-const nameGroup = document.getElementById("name-group");
-const passwordGroup = document.getElementById("password-group");
-const nameInput = document.getElementById("name");
-const passwordInput = document.getElementById("password");
-const googleSignInButton = document.getElementById("googleSignIn");
-const continueBtn = document.getElementById("continue-btn");
 const feedbackEl = document.getElementById("feedback");
+const googleSignInButton = document.getElementById("googleSignIn");
+
+const signinTab = document.getElementById("signin-tab");
+const signupTab = document.getElementById("signup-tab");
+const signinForm = document.getElementById("signin-form");
+const signupForm = document.getElementById("signup-form");
+
+const signinEmailInput = document.getElementById("signin-email");
+const signinPasswordInput = document.getElementById("signin-password");
 const forgotPasswordLink = document.getElementById("forgot-password-link");
 
-// --- State ---
-let state = "initial"; // initial, email-submitted, sign-in, sign-up
-let userEmail = "";
+const signupNameInput = document.getElementById("signup-name");
+const signupEmailInput = document.getElementById("signup-email");
+const signupPasswordInput = document.getElementById("signup-password");
 
 // --- UI Functions ---
 const showFeedback = (message, type = "error") => {
@@ -52,43 +52,50 @@ const showFeedback = (message, type = "error") => {
   feedbackEl.className = `feedback ${type}`;
 };
 
-const render = () => {
-  const isSignUp = state === "sign-up";
-  const isSignIn = state === "sign-in";
-
-  nameGroup?.classList.toggle("hidden", !isSignUp);
-  passwordGroup?.classList.toggle("hidden", !(isSignIn || isSignUp));
-
-  if (continueBtn) {
-    if (isSignUp) {
-      continueBtn.textContent = "Create Account";
-    } else if (isSignIn) {
-      continueBtn.textContent = "Sign In";
-    } else {
-      continueBtn.textContent = "Continue";
-    }
-  }
-
-  if (nameInput) {
-    nameInput.required = isSignUp;
-  }
-  if (passwordInput) {
-    passwordInput.required = isSignIn || isSignUp;
-  }
-};
-
-const setLoading = (isLoading) => {
+const setLoading = (isLoading, formType = null) => {
   if (googleSignInButton) {
     googleSignInButton.disabled = isLoading;
   }
-  if (continueBtn) {
-    continueBtn.disabled = isLoading;
-    if (isLoading) {
-      continueBtn.textContent = "Loading...";
-    } else {
-      render();
+
+  const signinBtn = signinForm?.querySelector("button[type='submit']");
+  const signupBtn = signupForm?.querySelector("button[type='submit']");
+
+  if (formType === 'signin' && signinBtn) {
+    signinBtn.disabled = isLoading;
+    signinBtn.textContent = isLoading ? "Loading..." : "Sign In";
+  } else if (formType === 'signup' && signupBtn) {
+    signupBtn.disabled = isLoading;
+    signupBtn.textContent = isLoading ? "Loading..." : "Create Account";
+  } else if (formType === null) {
+    // For Google Sign-In or general loading
+    if (signinBtn) signinBtn.disabled = isLoading;
+    if (signupBtn) signupBtn.disabled = isLoading;
+    if (!isLoading) {
+      // Reset text if not specific form loading
+      if (signinBtn) signinBtn.textContent = "Sign In";
+      if (signupBtn) signupBtn.textContent = "Create Account";
     }
   }
+};
+
+const switchTab = (targetFormId) => {
+  const allTabs = [signinTab, signupTab];
+  const allForms = [signinForm, signupForm];
+
+  allTabs.forEach(tab => {
+    if (tab) tab.classList.remove("active");
+  });
+  allForms.forEach(form => {
+    if (form) form.classList.add("hidden");
+  });
+
+  const activeTab = document.getElementById(`${targetFormId.replace('-form', '')}-tab`);
+  const activeForm = document.getElementById(targetFormId);
+
+  if (activeTab) activeTab.classList.add("active");
+  if (activeForm) activeForm.classList.remove("hidden");
+
+  showFeedback("", ""); // Clear feedback on tab switch
 };
 
 // --- Auth Logic ---
@@ -122,6 +129,7 @@ const sendIdTokenToServer = async (idToken) => {
   throw new Error(message);
 };
 
+// --- Event Listeners ---
 if (googleSignInButton) {
   googleSignInButton.addEventListener("click", async () => {
     showFeedback("", "");
@@ -136,49 +144,29 @@ if (googleSignInButton) {
     } catch (error) {
       console.error("Google sign-in failed", error);
       showFeedback("We couldn't sign you in with Google. Please try again.");
+    } finally {
       setLoading(false);
     }
   });
 }
 
-if (form) {
-  form.addEventListener("submit", async (event) => {
+if (signinForm) {
+  signinForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     showFeedback("", "");
-    setLoading(true);
-    userEmail = emailInput?.value || "";
+    setLoading(true, 'signin');
+
+    const email = signinEmailInput?.value || "";
+    const password = signinPasswordInput?.value || "";
+
+    if (!email || !password) {
+      showFeedback("Please enter both email and password.");
+      setLoading(false, 'signin');
+      return;
+    }
 
     try {
-      const methods = userEmail
-        ? await fetchSignInMethodsForEmail(auth, userEmail)
-        : [];
-
-      if (methods.includes("password")) {
-        state = "sign-in";
-        render();
-        const password = passwordInput?.value || "";
-        if (!password) {
-          showFeedback("Please enter your password.");
-          return;
-        }
-
-        const result = await signInWithEmailAndPassword(auth, userEmail, password);
-        const idToken = await getIdToken(result.user, true);
-        await sendIdTokenToServer(idToken);
-        return;
-      }
-
-      state = "sign-up";
-      render();
-      const password = passwordInput?.value || "";
-      const displayName = nameInput?.value || "";
-      if (!password || !displayName) {
-        showFeedback("Please provide your name and create a password.");
-        return;
-      }
-
-      const result = await createUserWithEmailAndPassword(auth, userEmail, password);
-      await updateProfile(result.user, { displayName });
+      const result = await signInWithEmailAndPassword(auth, email, password);
       const idToken = await getIdToken(result.user, true);
       await sendIdTokenToServer(idToken);
     } catch (error) {
@@ -191,22 +179,56 @@ if (form) {
             return "This account has been disabled. Contact support.";
           case "auth/user-not-found":
           case "auth/wrong-password":
-            state = "sign-in";
-            render();
-            return "Invalid credentials. Please try again.";
-          case "auth/email-already-in-use":
-            state = "sign-in";
-            render();
-            return "Email already in use. Please sign in.";
+            return "Invalid email or password. Please try again.";
           default:
-            state = "initial";
-            render();
             return "We couldn't sign you in. Please try again.";
         }
       })();
       showFeedback(message);
     } finally {
-      setLoading(false);
+      setLoading(false, 'signin');
+    }
+  });
+}
+
+if (signupForm) {
+  signupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    showFeedback("", "");
+    setLoading(true, 'signup');
+
+    const name = signupNameInput?.value || "";
+    const email = signupEmailInput?.value || "";
+    const password = signupPasswordInput?.value || "";
+
+    if (!name || !email || !password) {
+      showFeedback("Please provide your name, email, and password.");
+      setLoading(false, 'signup');
+      return;
+    }
+
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(result.user, { displayName: name });
+      const idToken = await getIdToken(result.user, true);
+      await sendIdTokenToServer(idToken);
+    } catch (error) {
+      console.error("Email sign-up failed", error);
+      const message = (() => {
+        switch (error.code) {
+          case "auth/invalid-email":
+            return "Please enter a valid email address.";
+          case "auth/email-already-in-use":
+            return "This email is already in use. Please sign in instead.";
+          case "auth/weak-password":
+            return "Password is too weak. Please choose a stronger password.";
+          default:
+            return "We couldn't create your account. Please try again.";
+        }
+      })();
+      showFeedback(message);
+    } finally {
+      setLoading(false, 'signup');
     }
   });
 }
@@ -214,13 +236,13 @@ if (form) {
 if (forgotPasswordLink) {
   forgotPasswordLink.addEventListener("click", async (event) => {
     event.preventDefault();
-    const email = emailInput?.value;
+    const email = signinEmailInput?.value;
     if (!email) {
       showFeedback("Please enter your email address to reset your password.");
       return;
     }
 
-    setLoading(true);
+    setLoading(true, 'signin');
     showFeedback("", "");
     try {
       await sendPasswordResetEmail(auth, email);
@@ -231,10 +253,18 @@ if (forgotPasswordLink) {
         "Could not send password reset email. Please check the address and try again."
       );
     } finally {
-      setLoading(false);
+      setLoading(false, 'signin');
     }
   });
 }
 
-// Initial render
-render();
+if (signinTab) {
+  signinTab.addEventListener("click", () => switchTab("signin-form"));
+}
+
+if (signupTab) {
+  signupTab.addEventListener("click", () => switchTab("signup-form"));
+}
+
+// Initial setup: ensure sign-in form is active by default
+switchTab("signin-form");

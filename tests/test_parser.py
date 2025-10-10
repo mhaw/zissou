@@ -1,3 +1,6 @@
+import json
+import logging
+
 from app.services.parser import extract_text
 from app.utils.text_cleaner import clean_text
 
@@ -86,7 +89,7 @@ def test_extract_text_hybrid_retry_success(monkeypatch):
     assert result["fetch_profile"]["Referer"] == "https://news.google.com/"
 
 
-def test_extract_text_prefers_longest_engine_output(monkeypatch):
+def test_extract_text_stops_at_first_success(monkeypatch):
     monkeypatch.setattr(
         "app.services.parser.fetch_with_resilience",
         lambda url, user_agent=None, **kwargs: {"html": "payload", "final_url": url},
@@ -135,8 +138,8 @@ def test_extract_text_prefers_longest_engine_output(monkeypatch):
 
     result = extract_text("http://example.com/article")
 
-    assert result["parser"] == "readability"
-    assert len(result["text"]) == 1600
+    assert result["parser"] == "newspaper3k"
+    assert len(result["text"]) == 600
 
 
 def test_clean_text_normalises_whitespace_and_boilerplate():
@@ -179,6 +182,34 @@ def test_collect_paragraphs_captures_content_beyond_ads():
     assert paragraphs[1] == trailing
 
 
+def test_collect_paragraphs_preserves_headings_and_lists():
+    if BeautifulSoup is None:
+        return
+
+    intro = "This introduction paragraph is comfortably longer than the heuristic limit."  # noqa: E501
+    html = f"""
+        <html>
+            <body>
+                <article>
+                    <h1>Headline One</h1>
+                    <p>{intro}</p>
+                    <ul>
+                        <li>First bullet keeps its marker.</li>
+                        <li>Second bullet provides additional detail for testing.</li>
+                    </ul>
+                </article>
+            </body>
+        </html>
+    """
+
+    soup = BeautifulSoup(html, "lxml")
+    paragraphs = parser_module._collect_paragraphs(soup)
+
+    assert paragraphs[0] == "## Headline One"
+    assert paragraphs[1] == intro
+    assert paragraphs[2].startswith("- First bullet")
+
+
 def test_extract_with_trafilatura_handles_new_metadata_signature(monkeypatch):
     from types import SimpleNamespace
 
@@ -213,3 +244,81 @@ def test_extract_with_trafilatura_handles_new_metadata_signature(monkeypatch):
     assert result["author"] == "Author"
     assert result["image_url"] == "https://example.com/cover.jpg"
     assert captured["default_url"] == "http://example.com/article"
+
+
+def test_extract_text_skips_archive_for_long_trafilatura(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.parser.fetch_with_resilience",
+        lambda url, user_agent=None: {"html": "<html></html>", "final_url": url},
+    )
+
+    def fake_process(html, origin_url, resolved_url=None):
+        return {
+            "text": "x" * (parser_module.FALLBACK_MIN_LENGTH + 10),
+            "parser": "trafilatura",
+            "source_url": origin_url,
+            "resolved_url": resolved_url or origin_url,
+        }
+
+    def fail_truncated(_):  # pragma: no cover - should not be invoked
+        raise AssertionError("Truncation check should be skipped for long trafilatura output")
+
+    def fail_archive(*_, **__):  # pragma: no cover - should not be invoked
+        raise AssertionError("Archive recovery should not run for long trafilatura output")
+
+    monkeypatch.setattr("app.services.parser._process_html", fake_process)
+    monkeypatch.setattr("app.services.parser.is_likely_truncated", fail_truncated)
+    monkeypatch.setattr("app.services.parser.recover_truncated_content", fail_archive)
+
+    result = extract_text("https://example.com/trafilatura-long")
+    assert result["archive_attempted"] is False
+
+
+def test_domain_override_prioritises_trafilatura_for_nytimes():
+    parser_module._DOMAIN_SUCCESS_CACHE.clear()
+    pipeline = parser_module._build_pipeline_for(
+        "https://www.nytimes.com/2024/02/01/example.html"
+    )
+    engines = [name for name, _ in pipeline]
+    assert engines[0] == "trafilatura"
+    assert "goose3" in engines
+
+
+def test_process_html_emits_structured_logs(monkeypatch, caplog):
+    parser_module._DOMAIN_SUCCESS_CACHE.clear()
+    caplog.set_level(logging.INFO, logger="app.services.parser")
+
+    def fake_extractor(url, html, source_url=None):
+        return {
+            "text": "z" * 800,
+            "parser": "fake",
+            "source_url": source_url or url,
+            "resolved_url": url,
+        }
+
+    monkeypatch.setattr(
+        parser_module,
+        "_build_pipeline_for",
+        lambda url: (("fake", fake_extractor),),
+    )
+
+    result = parser_module._process_html(
+        "<html><body>content</body></html>",
+        "https://example.com/structured",
+        None,
+    )
+
+    assert result["parser"] == "fake"
+    structured_messages = [
+        record.message
+        for record in caplog.records
+        if record.name == "app.services.parser" and record.message.startswith("{")
+    ]
+    assert structured_messages, "Expected structured extractor logs"
+    payloads = [json.loads(message) for message in structured_messages]
+    pipeline_events = [p for p in payloads if p.get("event") == "extractor_pipeline"]
+    assert pipeline_events, "Expected consolidated extractor pipeline event"
+    summary = pipeline_events[0]
+    assert summary["winner"] == "fake"
+    assert summary["status"] == "success"
+    assert summary["attempts"] and summary["attempts"][0]["engine"] == "fake"

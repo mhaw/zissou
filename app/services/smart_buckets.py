@@ -70,7 +70,7 @@ def list_smart_buckets() -> list[SmartBucket]:
     _require_db()
     try:
         smart_buckets_ref = db.collection(
-            os.getenv("FIRESTORE_COLLECTION_SMART_BUCKETS")
+            os.getenv("FIRESTORE_COLLECTION_SMART_BUCKETS", "smart_buckets")
         )
         docs = smart_buckets_ref.stream()
         return [_doc_to_smart_bucket(doc) for doc in docs]

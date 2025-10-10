@@ -28,6 +28,9 @@ _CONTROL_CHARS = {
     "\ufeff",  # zero-width no-break space / BOM
 }
 
+_HEADING_PREFIX = re.compile(r"^##\s+")
+_LIST_PREFIX = re.compile(r"^-\s+")
+
 
 def _strip_control_chars(text: str) -> str:
     for char in _CONTROL_CHARS:
@@ -72,6 +75,15 @@ def clean_text(raw_text: str | None) -> str:
                 continue
             normalised_lines.append("")
         else:
+            if _HEADING_PREFIX.match(line) and normalised_lines and normalised_lines[-1]:
+                normalised_lines.append("")
+            if (
+                _LIST_PREFIX.match(line)
+                and normalised_lines
+                and normalised_lines[-1]
+                and not _LIST_PREFIX.match(normalised_lines[-1])
+            ):
+                normalised_lines.append("")
             normalised_lines.append(line)
 
     cleaned_text = "\n".join(normalised_lines).strip()

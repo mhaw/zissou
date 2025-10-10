@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Centralized Firebase authentication configuration using `FirebaseAuthConfig` dataclass for improved validation and management.
+- Asynchronous archive recovery utility with concurrency limits, Firestore-backed failure caching, and optional Goose3 extraction tier.
+- Configuration flags `ARCHIVE_TIMEOUT`, `ARCHIVE_CONCURRENCY`, and `FALLBACK_MIN_LENGTH` to tune archive backoff and high-confidence extractor results.
+
+### Changed
+- Refactored login and signup forms in `app/templates/login.html` and `app/static/js/login.js` for a clearer user experience with separate sign-in and sign-up views.
+- Enhanced logging in `app/routes/auth.py` with structured `auth_event` tags for better debugging and analysis of authentication flows.
+- Removed `ADMIN_EMAILS` environment variable usage for role assignment; new users now default to the "member" role, with admin status managed separately.
+- Extraction pipeline now prioritises domain-specific extractor preferences, logs structured `extractor_result` events, and skips archive fallbacks when primary engines yield high-confidence output.
+- Bucket and tag editors now send `X-CSRFToken` headers with credentials when calling `/api/items/*`, unblocking authenticated POSTs without disabling CSRF protection.
+- Cloud Run images export `GRPC_VERBOSITY=ERROR` to suppress noisy gRPC warnings, and the progress page polls `/status/<task_id>` every 2 seconds with automatic stop on completion.
+
+### Removed
+- Removed support for Google Cloud Identity-Aware Proxy (IAP) as an authentication backend. The application now exclusively uses Firebase Authentication.
+- The `AUTH_BACKEND` environment variable is no longer used.
+- Simplified authentication logic in `app/auth.py` and `app/routes/auth.py` by removing IAP-specific code.
+- Deleted `tests/test_auth_flow.py`, which contained IAP-specific tests.
+
+## [0.2.0] - 2025-10-10
+
 ### Changed
 - Changed the default authentication method from Google Cloud IAP to the built-in Firebase Authentication. This simplifies the deployment process and removes the need for a costly external HTTPS Load Balancer, making the application more accessible and cost-effective for internal use.
 - The `AUTH_BACKEND` environment variable now defaults to `firebase`.

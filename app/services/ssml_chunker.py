@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Callable, List, Optional
+from typing import Callable, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -61,37 +61,53 @@ def _split_long_sentence(sentence: str, max_bytes: int):
         yield current
 
 
+def _iter_blocks(text: str) -> Iterable[str]:
+    for block in re.split(r"(?:\r?\n\s*){2,}", text):
+        candidate = block.strip()
+        if candidate:
+            yield candidate
+
+
 def chunk_text(text: str, max_bytes: int) -> List[str]:
     """Split text into UTF-8 byte-aware chunks under the given limit."""
     if not text:
         return []
 
     chunks: List[str] = []
-    sentences = re.split(r"(?<=[.!?])\s+", text)
     current = ""
 
-    for sentence in sentences:
-        if not sentence:
-            continue
-
-        candidate = (current + " " + sentence).strip() if current else sentence
-        if len(candidate.encode("utf-8")) <= max_bytes:
-            current = candidate
+    for block in _iter_blocks(text):
+        block_bytes = len(block.encode("utf-8"))
+        if block_bytes <= max_bytes:
+            candidate = f"{current}\n\n{block}".strip() if current else block
+            if len(candidate.encode("utf-8")) <= max_bytes:
+                current = candidate
+                continue
+            if current:
+                chunks.append(current)
+            current = block
             continue
 
         if current:
             chunks.append(current)
             current = ""
 
-        if len(sentence.encode("utf-8")) <= max_bytes:
-            current = sentence
-            continue
+        sentences = re.split(r"(?<=[.!?])\s+", block)
+        for sentence in sentences:
+            if not sentence:
+                continue
 
-        for fragment in _split_long_sentence(sentence, max_bytes):
-            if len(fragment.encode("utf-8")) <= max_bytes:
-                chunks.append(fragment)
-            else:
-                chunks.extend(_split_by_bytes(fragment, max_bytes))
+            candidate = sentence.strip()
+            if len(candidate.encode("utf-8")) <= max_bytes:
+                chunks.append(candidate)
+                continue
+
+            for fragment in _split_long_sentence(candidate, max_bytes):
+                fragment_bytes = len(fragment.encode("utf-8"))
+                if fragment_bytes <= max_bytes:
+                    chunks.append(fragment)
+                else:
+                    chunks.extend(_split_by_bytes(fragment, max_bytes))
 
     if current:
         chunks.append(current)
@@ -131,7 +147,7 @@ def text_to_ssml_fragments(
 
             fragment = fragment_builder(
                 chunk,
-                break_after and index == len(raw_chunks) - 1,
+                break_after=break_after and index == len(raw_chunks) - 1,
             )
             fragment_size = _fragment_size(fragment)
             if fragment_size > GOOGLE_TTS_MAX_INPUT_BYTES:

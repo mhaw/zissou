@@ -1,20 +1,25 @@
 import hashlib
+import html
 import io
 import json
 import logging
 import os
 import re
-import time
-import html
 import tempfile
+import threading
+import time
 import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+import jwt
+import requests
 from dateutil import parser as date_parser
 from flask import Blueprint, jsonify, g, request
 from pydub import AudioSegment  # type: ignore[import-untyped]
+from typing import Any, Optional
 
+from app.extensions import csrf
 from app.models.item import Item
 from app.services import buckets as buckets_service
 from app.services import (
@@ -31,12 +36,9 @@ from app.services.tts import TTSError, get_audio_format_info
 from app.services.ssml_chunker import (
     MAX_TTS_CHUNK_BYTES,
     SSMLChunkingError,
-    chunk_text,
     text_to_ssml_fragments,
 )
 
-# Imports for token verification
-from google.auth.transport import requests
 from google.oauth2 import id_token
 
 bp = Blueprint("tasks", __name__, url_prefix="/tasks")
@@ -52,6 +54,11 @@ try:
     NORMALIZE_TARGET_DBFS = float(os.getenv("TTS_NORMALIZE_TARGET_DBFS", "-14"))
 except (TypeError, ValueError):
     NORMALIZE_TARGET_DBFS = -14.0
+
+_CERT_CACHE_TTL = int(os.getenv("TASK_CERT_CACHE_SECONDS", "3600"))
+_cert_cache: dict[str, Any] = {}
+_cert_cache_at: float | None = None
+_cert_lock = threading.Lock()
 
 
 def _normalize_audio_segment(segment: AudioSegment) -> AudioSegment:
@@ -118,37 +125,54 @@ def _verify_token(req):
     token = auth_header.split("Bearer ")[1]
 
     try:
-        audience = os.getenv("SERVICE_URL")
-        if not audience:
+        public_keys = _get_google_public_keys()
+
+        # 2. Decode the token header to get the key ID (kid)
+        header = jwt.get_unverified_header(token)
+        kid = header["kid"]
+        public_key = public_keys.get(kid)
+        if not public_key:
+            logger.error("Public key for kid %s not found.", kid)
+            return None, "Invalid token: public key not found"
+
+        # 3. Verify the token's signature and decode it
+        decoded_token = jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            audience=None,  # We will manually verify audience
+            issuer="https://accounts.google.com",
+            options={"verify_aud": False},  # Disable audience verification by PyJWT
+        )
+
+        # 4. Manually verify audience
+        service_url = os.getenv("SERVICE_URL")
+        if not service_url:
             logger.error("SERVICE_URL environment variable not set.")
             return None, "Configuration error: SERVICE_URL not set"
 
-        additional_audience = os.getenv("SERVICE_TASKS_URL")
-        if not additional_audience and audience:
-            additional_audience = audience.rstrip("/") + "/tasks/process"
-
-        decoded_token = id_token.verify_oauth2_token(token, requests.Request())
+        expected_audience = service_url.rstrip("/") + "/tasks/process"
         token_audience = decoded_token.get("aud")
 
-        expected_audiences = {audience.rstrip("/")}
-        if additional_audience:
-            expected_audiences.add(additional_audience.rstrip("/"))
-
-        def _normalize_audience(value):
-            if isinstance(value, str):
-                return value.rstrip("/")
-            return value
-
-        if isinstance(token_audience, (list, tuple, set)):
-            audience_valid = any(
-                _normalize_audience(aud) in expected_audiences for aud in token_audience
+        if token_audience != expected_audience:
+            logger.error(
+                "Invalid token audience. Expected %s, got %s",
+                expected_audience,
+                token_audience,
             )
-        else:
-            audience_valid = _normalize_audience(token_audience) in expected_audiences
-
-        if not audience_valid:
-            logger.error("Invalid token audience: %s", token_audience)
             return None, "Invalid token audience"
+
+        # 5. Manually verify issuer
+        if decoded_token.get("iss") != "https://accounts.google.com":
+            logger.error("Invalid token issuer: %s", decoded_token.get("iss"))
+            return None, "Invalid token issuer"
+
+        # 6. Manually verify expiration
+        if datetime.fromtimestamp(
+            decoded_token.get("exp"), tz=timezone.utc
+        ) < datetime.now(timezone.utc):
+            logger.error("Token has expired.")
+            return None, "Token expired"
 
         invoker_email = os.getenv("SERVICE_ACCOUNT_EMAIL")
         if not invoker_email:
@@ -160,9 +184,15 @@ def _verify_token(req):
             return None, "Invalid invoker"
 
         return decoded_token, None
-    except ValueError as exc:
+    except jwt.exceptions.PyJWTError as exc:
         logger.exception("Token verification failed: %s", exc)
         return None, f"Token verification failed: {exc}"
+    except requests.exceptions.RequestException as exc:
+        logger.exception("Failed to fetch public keys: %s", exc)
+        return None, f"Failed to fetch public keys: {exc}"
+    except Exception as exc:
+        logger.exception("Unexpected error during token verification: %s", exc)
+        return None, f"Unexpected error during token verification: {exc}"
 
 
 def _build_narration_intro(parsed_data: dict, fallback_url: str, published_at) -> str:
@@ -257,6 +287,7 @@ def _build_ssml_fragment(text: str, *, break_after: bool = False) -> str:
     return ET.tostring(speak, encoding="unicode")
 
 
+@csrf.exempt
 @bp.route("/process", methods=["POST"])
 def process_task_handler():
     """The webhook handler for Google Cloud Tasks."""
@@ -397,18 +428,24 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
 
         narration_intro = _build_narration_intro(parsed_data, url, published_at)
 
-        body_chunks = chunk_text(text_content, MAX_TTS_CHUNK_BYTES)
-        text_length = len(narration_intro) + sum(len(chunk) for chunk in body_chunks)
+        total_text_bytes = len(
+            (narration_intro + "\n\n" + text_content).encode("utf-8", errors="ignore")
+        )
 
         try:
             ssml_fragments = text_to_ssml_fragments(
-                narration_intro, _build_ssml_fragment, break_after=True
+                narration_intro,
+                _build_ssml_fragment,
+                break_after=True,
+                max_bytes=MAX_TTS_CHUNK_BYTES,
             )
-            for chunk in body_chunks:
-                if chunk.strip():
-                    ssml_fragments.extend(
-                        text_to_ssml_fragments(chunk, _build_ssml_fragment)
-                    )
+            ssml_fragments.extend(
+                text_to_ssml_fragments(
+                    text_content,
+                    _build_ssml_fragment,
+                    max_bytes=MAX_TTS_CHUNK_BYTES,
+                )
+            )
         except SSMLChunkingError as exc:
             raise TTSError(str(exc)) from exc
 
@@ -428,20 +465,15 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         try:
             total_chunks = len(ssml_fragments)
             for index, fragment in enumerate(ssml_fragments, start=1):
-                if index == 1 or index == total_chunks or index % 5 == 0:
-                    logger.info(
-                        "Task %s: Synthesizing chunk %s/%s",
-                        task_id,
-                        index,
-                        total_chunks,
-                    )
-                else:
-                    logger.debug(
-                        "Task %s: Synthesizing chunk %s/%s",
-                        task_id,
-                        index,
-                        total_chunks,
-                    )
+                log_context = {
+                    "task_id": task_id,
+                    "chunk_index": index,
+                    "chunk_total": total_chunks,
+                }
+                if index in {1, total_chunks}:
+                    logger.info("tts.chunk", extra=log_context)
+                elif index % 5 == 0:
+                    logger.debug("tts.chunk", extra=log_context)
                 audio_chunk_content, _, voice_setting = tts.text_to_speech(
                     fragment, voice_name=voice, use_ssml=True
                 )
@@ -486,6 +518,18 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         upload_ms = int((time.perf_counter() - upload_start) * 1000)
 
         tasks_service.update_task(task_id, status="SAVING_ITEM")
+        logger.info(
+            "task.pipeline",
+            extra={
+                "task_id": task_id,
+                "parser": parser_name,
+                "chunk_count": chunk_count,
+                "text_bytes": total_text_bytes,
+                "parsing_ms": parsing_ms,
+                "tts_ms": tts_ms,
+                "upload_ms": upload_ms,
+            },
+        )
 
         processing_time_ms = int(
             (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
@@ -493,6 +537,7 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         pipeline_tools = list(
             dict.fromkeys([parser_name, "google-tts", "gcs", "pydub"])
         )
+        text_length = len(narration_intro) + len(text_content)
 
         new_item = Item(
             title=parsed_data.get("title", "Untitled"),
@@ -577,3 +622,22 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
             error_code=TaskErrorCodes.UNKNOWN,
         )
         raise
+def _get_google_public_keys() -> dict[str, Any]:
+    global _cert_cache, _cert_cache_at
+
+    now = time.monotonic()
+    with _cert_lock:
+        if _cert_cache and _cert_cache_at and now - _cert_cache_at < _CERT_CACHE_TTL:
+            return _cert_cache
+
+        response = requests.get(
+            "https://www.googleapis.com/oauth2/v3/certs", timeout=5
+        )
+        response.raise_for_status()
+        keys = {
+            jwk["kid"]: jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+            for jwk in response.json().get("keys", [])
+        }
+        _cert_cache = keys
+        _cert_cache_at = now
+        return _cert_cache

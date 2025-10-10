@@ -10,3 +10,17 @@
 *.pyo
 __pycache__
 instance
+docs/
+tests/
+reports/
+Makefile
+validate_env.sh
+tools/
+node_modules/
+package.json
+package-lock.json
+playwright.config.js
+*.md
+env.yaml
+.codex/
+.gemini/

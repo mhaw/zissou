@@ -1,4 +1,24 @@
 #!/bin/sh
 
 # Start the web server
-gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --threads 4 --worker-class gthread app.main:app
+WORKERS=${GUNICORN_WORKERS:-1}
+THREADS=${GUNICORN_THREADS:-4}
+exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers "${WORKERS}" --threads "${THREADS}" --worker-class gthread \
+  --env "ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" \
+  --env "GCP_PROJECT_ID=${GCP_PROJECT_ID}" \
+  --env "GCS_BUCKET=${GCS_BUCKET}" \
+  --env "SECRET_KEY=${SECRET_KEY}" \
+  --env "FLASK_SECRET_KEY=${FLASK_SECRET_KEY}" \
+  --env "CLOUD_TASKS_QUEUE=${CLOUD_TASKS_QUEUE}" \
+  --env "CLOUD_TASKS_LOCATION=${CLOUD_TASKS_LOCATION}" \
+  --env "SERVICE_ACCOUNT_EMAIL=${SERVICE_ACCOUNT_EMAIL}" \
+  --env "SERVICE_URL=${SERVICE_URL}" \
+  --env "AUTH_BACKEND=${AUTH_BACKEND}" \
+  --env "AUTH_ENABLED=${AUTH_ENABLED}" \
+  --env "FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}" \
+  --env "FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY}" \
+  --env "FIREBASE_AUTH_DOMAIN=${FIREBASE_AUTH_DOMAIN}" \
+  --env "FLASK_SESSION_COOKIE_SECURE=${FLASK_SESSION_COOKIE_SECURE}" \
+  --env "FLASK_SESSION_COOKIE_NAME=${FLASK_SESSION_COOKIE_NAME}" \
+  --env "ENV=${ENV}" \
+  app.main:app

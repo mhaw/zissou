@@ -3,8 +3,10 @@ import os
 import time
 from urllib.parse import quote, urlparse
 
+from google.auth import default as google_auth_default
+from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage  # type: ignore[attr-defined]
-from google.cloud.exceptions import GoogleCloudError, NotFound
+from google.cloud.exceptions import GoogleCloudError, NotFound, Forbidden
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,13 @@ MAX_STORAGE_ATTEMPTS = int(os.getenv("STORAGE_UPLOAD_ATTEMPTS", "3"))
 STORAGE_RETRY_INITIAL_BACKOFF = float(os.getenv("STORAGE_RETRY_INITIAL_BACKOFF", "0.5"))
 
 _storage_client: storage.Client | None = None
+_client_expiry: float | None = None
+_bucket_checked_at: float | None = None
+
+STORAGE_CLIENT_TTL = float(os.getenv("STORAGE_CLIENT_TTL_SECONDS", "900"))
+STORAGE_BUCKET_REFRESH_SECONDS = float(
+    os.getenv("STORAGE_BUCKET_REFRESH_SECONDS", "300")
+)
 
 
 class StorageError(Exception):
@@ -54,10 +63,55 @@ class StorageError(Exception):
 
 
 def _get_storage_client() -> storage.Client:
-    global _storage_client
-    if _storage_client is None:
-        _storage_client = storage.Client(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
+    global _storage_client, _client_expiry
+
+    now = time.monotonic()
+    if _storage_client is not None and _client_expiry is not None and now < _client_expiry:
+        return _storage_client
+
+    project_hint = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT_ID")
+    try:
+        credentials, detected_project = google_auth_default(
+            scopes=("https://www.googleapis.com/auth/devstorage.read_write",)
+        )
+    except DefaultCredentialsError as exc:
+        raise StorageError(
+            "Google Cloud credentials not found. Provide GOOGLE_APPLICATION_CREDENTIALS "
+            "locally or ensure the Cloud Run service account has Storage access."
+        ) from exc
+
+    project = project_hint or detected_project
+    _storage_client = storage.Client(project=project, credentials=credentials)
+    _client_expiry = now + STORAGE_CLIENT_TTL
     return _storage_client
+
+
+def _ensure_bucket(client: storage.Client, bucket_name: str) -> storage.Bucket:
+    global _bucket_checked_at
+
+    bucket = client.bucket(bucket_name)
+    now = time.monotonic()
+    if _bucket_checked_at is not None and now - _bucket_checked_at < STORAGE_BUCKET_REFRESH_SECONDS:
+        return bucket
+
+    try:
+        exists = bucket.exists(timeout=10)
+    except Forbidden as exc:
+        raise StorageError(
+            f"Service account lacks permission to access bucket {bucket_name}: {exc}"
+        ) from exc
+    except GoogleCloudError as exc:
+        raise StorageError(
+            f"Failed to validate bucket {bucket_name}: {exc}"
+        ) from exc
+
+    if not exists:
+        raise StorageError(
+            f"GCS bucket {bucket_name} does not exist or is not accessible in the configured project."
+        )
+
+    _bucket_checked_at = now
+    return bucket
 
 
 def upload_to_gcs(
@@ -69,7 +123,7 @@ def upload_to_gcs(
         raise StorageError("GCS_BUCKET environment variable not set.")
 
     client = _get_storage_client()
-    bucket = client.bucket(bucket_name)
+    bucket = _ensure_bucket(client, bucket_name)
     blob = bucket.blob(destination_blob_name)
 
     last_error: Exception | None = None

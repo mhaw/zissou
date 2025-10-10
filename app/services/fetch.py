@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import random
@@ -7,9 +6,10 @@ import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Callable, Iterator, Optional
-from urllib.parse import quote
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 try:
     from playwright.sync_api import sync_playwright, PlaywrightContextManager
@@ -59,16 +59,10 @@ BLOCKING_PHRASES = [
     ).split(",")
     if phrase.strip()
 ]
-ARCHIVE_TODAY_BASE_URL = os.getenv("ARCHIVE_TODAY_BASE_URL", "https://archive.today")
-WAYBACK_API_URL = os.getenv("WAYBACK_API_URL", "https://archive.org/wayback/available")
-ARCHIVE_REQUEST_INTERVAL_SECONDS = float(
-    os.getenv("ARCHIVE_REQUEST_INTERVAL_SECONDS", "2")
-)
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 TRANSIENT_STATUS_CODES.update(range(505, 600))
 
-ExtractFn = Callable[[str, str, Optional[str]], dict]
 SleepFn = Callable[[float], None]
 
 
@@ -108,6 +102,33 @@ def _compute_hybrid_profiles() -> list[dict[str, str]]:
 
 
 _HYBRID_HEADER_PROFILES = _compute_hybrid_profiles()
+_session_lock = threading.Lock()
+_session: requests.Session | None = None
+
+
+def _retry_adapter() -> HTTPAdapter:
+    retry = Retry(
+        total=3,
+        backoff_factor=0.3,
+        status_forcelist=sorted(TRANSIENT_STATUS_CODES),
+        allowed_methods=("GET", "HEAD", "OPTIONS"),
+    )
+    return HTTPAdapter(max_retries=retry, pool_connections=16, pool_maxsize=32)
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is not None:
+        return _session
+    with _session_lock:
+        if _session is not None:
+            return _session
+        sess = requests.Session()
+        adapter = _retry_adapter()
+        sess.mount("https://", adapter)
+        sess.mount("http://", adapter)
+        _session = sess
+    return _session
 
 
 def _build_headers(user_agent: Optional[str]) -> dict[str, str]:
@@ -159,7 +180,8 @@ def fetch_with_resilience(
 ) -> dict:
     attempt = 0
     backoff = FETCH_BACKOFF_FACTOR
-    session = session or requests.Session()
+    session = session or _get_session()
+    started = time.perf_counter()
 
     while True:
         attempt += 1
@@ -175,26 +197,37 @@ def fetch_with_resilience(
                 allow_redirects=True,
             )
         except requests.RequestException as exc:
-            logger.warning("Request error for %s: %s", url, exc)
+            logger.warning(
+                "fetch.request_exception",
+                extra={"url": url, "attempt": attempt, "error": str(exc)},
+            )
             if attempt > FETCH_MAX_RETRIES:
                 return {"error": f"Failed to fetch URL: {exc}"}
             wait = _retry_wait_seconds(None, backoff)
-            logger.debug("Sleeping %s seconds before retrying %s", wait, url)
+            logger.debug(
+                "fetch.retry_sleep",
+                extra={"url": url, "attempt": attempt, "sleep_seconds": wait},
+            )
             sleep(wait)
             backoff = min(backoff * 2, FETCH_MAX_BACKOFF_SECONDS)
             continue
 
         if response.status_code in TRANSIENT_STATUS_CODES:
-            logger.info(
-                "Transient status %s for %s (attempt %s)",
-                response.status_code,
-                url,
-                attempt,
+            logger.warning(
+                "fetch.retryable_status",
+                extra={
+                    "url": url,
+                    "status": response.status_code,
+                    "attempt": attempt,
+                },
             )
             if attempt > FETCH_MAX_RETRIES:
                 return {"error": f"Failed to fetch URL: HTTP {response.status_code}"}
             wait = _retry_wait_seconds(response, backoff)
-            logger.debug("Sleeping %s seconds before retrying %s", wait, url)
+            logger.debug(
+                "fetch.retry_sleep",
+                extra={"url": url, "attempt": attempt, "sleep_seconds": wait},
+            )
             sleep(wait)
             backoff = min(backoff * 2, FETCH_MAX_BACKOFF_SECONDS)
             continue
@@ -203,13 +236,25 @@ def fetch_with_resilience(
             logger.error("Non-retriable status %s for %s", response.status_code, url)
             return {"error": f"Failed to fetch URL: HTTP {response.status_code}"}
 
-        return {
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        payload = {
             "html": response.text,
             "final_url": response.url,
             "status_code": response.status_code,
             "response_headers": dict(response.headers),
             "request_headers": headers,
+            "elapsed_ms": elapsed_ms,
         }
+        logger.debug(
+            "fetch.success",
+            extra={
+                "url": payload["final_url"],
+                "status": payload["status_code"],
+                "attempts": attempt,
+                "elapsed_ms": elapsed_ms,
+            },
+        )
+        return payload
 
 
 def fetch_with_playwright(url: str, timeout: Optional[float] = None) -> dict:
@@ -227,28 +272,6 @@ def fetch_with_playwright(url: str, timeout: Optional[float] = None) -> dict:
             return {"html": html, "final_url": final_url}
         except Exception as exc:
             return {"error": f"Playwright failed to fetch URL: {exc}"}
-
-
-class ArchiveRateLimiter:
-    def __init__(self, interval: float) -> None:
-        self.interval = interval
-        self._lock = threading.Lock()
-        self._last_seen: dict[str, float] = {}
-
-    def wait(self, key: str, sleep: SleepFn = time.sleep) -> None:
-        if self.interval <= 0:
-            return
-        with self._lock:
-            now = time.monotonic()
-            last = self._last_seen.get(key)
-            if last is not None:
-                remaining = last + self.interval - now
-                if remaining > 0:
-                    sleep(remaining)
-            self._last_seen[key] = time.monotonic()
-
-
-_rate_limiter = ArchiveRateLimiter(ARCHIVE_REQUEST_INTERVAL_SECONDS)
 
 
 def is_likely_truncated(text: Optional[str]) -> bool:
@@ -287,94 +310,3 @@ def hybrid_fetch_attempts(
             sleep=sleep,
             extra_headers=attempt_headers,
         )
-
-
-def _enqueue_archive_snapshot(url: str, service: str) -> None:
-    logger.info("Scheduling snapshot for %s via %s (stub)", url, service)
-    # Stub hook for Cloud Tasks or Celery integration.
-
-
-def _fetch_archive_today_snapshot(
-    url: str,
-    *,
-    fetcher: Callable[[str], dict],
-    sleep: SleepFn,
-) -> Optional[dict]:
-    snapshot_url = f"{ARCHIVE_TODAY_BASE_URL.rstrip('/')}/latest/{url}"
-    _rate_limiter.wait("archive_today", sleep)
-    logger.info("Attempting archive.today snapshot for %s", url)
-    result = fetcher(snapshot_url)
-    if result.get("error"):
-        _enqueue_archive_snapshot(url, "archive.today")
-        return None
-    return result
-
-
-def _fetch_wayback_snapshot(
-    url: str,
-    *,
-    fetcher: Callable[[str], dict],
-    sleep: SleepFn,
-) -> Optional[dict]:
-    api_url = f"{WAYBACK_API_URL.rstrip('/')}?url={quote(url, safe='')}"
-    _rate_limiter.wait("wayback_api", sleep)
-    logger.info("Checking Wayback Machine for %s", url)
-    api_response = fetcher(api_url)
-    if api_response.get("error"):
-        return None
-    try:
-        payload = json.loads(api_response.get("html", ""))
-    except json.JSONDecodeError:
-        logger.warning("Wayback response was not valid JSON for %s", url)
-        return None
-
-    snapshots = payload.get("archived_snapshots", {})
-    closest = snapshots.get("closest") if isinstance(snapshots, dict) else None
-    snapshot_url = closest.get("url") if isinstance(closest, dict) else None
-    if not snapshot_url:
-        _enqueue_archive_snapshot(url, "wayback")
-        return None
-
-    _rate_limiter.wait("wayback_snapshot", sleep)
-    return fetcher(snapshot_url)
-
-
-def recover_truncated_content(
-    url: str,
-    extracted_text: Optional[str],
-    *,
-    extractor: ExtractFn,
-    fetcher: Callable[[str], dict] = fetch_with_resilience,
-    sleep: SleepFn = time.sleep,
-) -> Optional[dict]:
-    if not is_likely_truncated(extracted_text):
-        return None
-
-    logger.info("Truncated content detected for %s; attempting archive recovery", url)
-
-    services = (
-        ("archive.today", _fetch_archive_today_snapshot),
-        ("wayback", _fetch_wayback_snapshot),
-    )
-
-    for label, fetch_fn in services:
-        try:
-            snapshot = fetch_fn(url, fetcher=fetcher, sleep=sleep)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            logger.warning("Archive lookup via %s failed for %s: %s", label, url, exc)
-            continue
-
-        if not snapshot or snapshot.get("error"):
-            continue
-
-        processed = extractor(snapshot.get("html", ""), url, snapshot.get("final_url"))
-        if processed.get("error"):
-            continue
-
-        if not is_likely_truncated(processed.get("text")):
-            processed["fetched_via"] = label
-            processed["archive_snapshot_url"] = snapshot.get("final_url")
-            return processed
-
-    logger.info("Archive recovery did not improve content for %s", url)
-    return None

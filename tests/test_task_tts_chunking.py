@@ -34,6 +34,26 @@ def test_ssml_fragments_stay_within_limit(monkeypatch):
     )
 
 
+def test_chunk_text_preserves_headings(monkeypatch):
+    chunker = _load_chunker(monkeypatch, TTS_MAX_CHUNK_BYTES="1600")
+    text = (
+        "## Heading\n\n"
+        "This paragraph contains enough detail to exceed any minimal threshold "
+        "ensuring the chunker keeps it intact while respecting byte limits. "
+        "It includes multiple sentences to trigger sentence-based splitting if needed.\n\n"
+        "- Bullet point one adds emphasis.\n"
+        "- Bullet point two provides further context."
+    )
+
+    chunks = chunker.chunk_text(text, chunker.MAX_TTS_CHUNK_BYTES)
+
+    assert any(chunk.startswith("## Heading") for chunk in chunks)
+    assert any("- Bullet point one" in chunk for chunk in chunks)
+    assert all(
+        len(chunk.encode("utf-8")) <= chunker.MAX_TTS_CHUNK_BYTES for chunk in chunks
+    )
+
+
 def test_ssml_break_only_on_terminal_fragment(monkeypatch):
     chunker = _load_chunker(monkeypatch)
     text = "This is sentence one. " * 40

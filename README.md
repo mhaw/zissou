@@ -99,6 +99,16 @@ npm run test:e2e
 
 HTML reports are written to `reports/playwright`.
 
+### Frontend API calls & CSRF
+
+All authenticated AJAX calls must include the Flask-WTF CSRF token. The base layout exposes it via:
+
+```html
+<meta name="csrf-token" content="{{ csrf_token() }}">
+```
+
+Client scripts should read this value (see `window.Zissou.getCsrfToken()`), send it as the `X-CSRFToken` header, and opt into `credentials: 'include'` on `fetch` so session cookies accompany the request. The bucket and tag editors already follow this pattern—reuse the helper for any new endpoints to avoid `400 CSRF token missing` responses.
+
 ## Cloud Deployment
 
 ### Step 1: Set up GCP Infrastructure
@@ -193,7 +203,8 @@ Key environment variables:
 - `FETCH_MAX_RETRIES`, `FETCH_BACKOFF_FACTOR`, `FETCH_MAX_BACKOFF_SECONDS` – tune retry cadence.
 - `FETCH_ACCEPT_LANGUAGE_OPTIONS`, `FETCH_ACCEPT_OPTIONS` – pipe-separated header rotations.
 - `PARSER_TRUNCATION_MIN_LENGTH`, `TRUNCATION_BLOCKING_PHRASES` – adjust truncation heuristics.
-- `ARCHIVE_TODAY_BASE_URL`, `WAYBACK_API_URL`, `ARCHIVE_REQUEST_INTERVAL_SECONDS` – steer archive endpoints and rate limits.
+- `ARCHIVE_TODAY_BASE_URL`, `WAYBACK_API_URL`, `ARCHIVE_REQUEST_INTERVAL_SECONDS`, `ARCHIVE_TIMEOUT`, `ARCHIVE_CONCURRENCY` – steer archive endpoints, rate limits, and total wait time.
+- `FALLBACK_MIN_LENGTH` – bypass archive fallbacks when high-fidelity extractors return long-form content (default 1500 characters).
 
 ### Server-Side Caching
 

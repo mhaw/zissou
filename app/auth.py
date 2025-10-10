@@ -1,4 +1,4 @@
-"""Authentication helpers for Firebase or Google IAP backed sessions."""
+"""Authentication helpers for Firebase backed sessions."""
 
 from __future__ import annotations
 
@@ -34,27 +34,6 @@ PUBLIC_ENDPOINT_PREFIXES: tuple[str, ...] = ("auth.",)
 PUBLIC_ENDPOINTS: set[str] = {"static"}
 
 
-def _get_auth_backend() -> str:
-    backend = current_app.config.get("AUTH_BACKEND", "iap")
-    if isinstance(backend, str):
-        backend = backend.strip().lower()
-    else:
-        backend = "iap"
-    if backend not in {"firebase", "iap"}:
-        logger.warning("Unknown AUTH_BACKEND %s; defaulting to 'iap'.", backend)
-        backend = "iap"
-    return backend
-
-
-def _admin_email_set() -> set[str]:
-    raw_value = current_app.config.get("ADMIN_EMAILS", [])
-    if isinstance(raw_value, str):
-        candidates = [piece.strip().lower() for piece in raw_value.split(",")]
-    else:
-        candidates = [str(piece).strip().lower() for piece in raw_value]
-    return {candidate for candidate in candidates if candidate}
-
-
 def build_user_context(
     claims: dict[str, Any], db_user: Optional[dict[str, Any]] = None
 ) -> dict[str, Any]:
@@ -77,7 +56,7 @@ def build_user_context(
     }
 
 
-def _sync_user_record(uid: str, email: str, name: str, role: str) -> Optional[User]:
+def _sync_user_record(uid: str, email: str, name: str) -> Optional[User]:
     """Ensure there is a backing user record in Firestore when possible."""
     db_client = getattr(users_service, "db", None)
     if db_client is None:
@@ -98,7 +77,7 @@ def _sync_user_record(uid: str, email: str, name: str, role: str) -> Optional[Us
                 id=uid,
                 email=email,
                 name=name,
-                role=role,
+                role="member",  # Default role for new users
             )
         )
     except users_service.FirestoreError:
@@ -110,39 +89,6 @@ def _sync_user_record(uid: str, email: str, name: str, role: str) -> Optional[Us
     except users_service.FirestoreError:
         logger.exception("Failed to read user record after creation for %s", uid)
         return None
-
-
-def _user_from_iap_headers() -> Optional[dict[str, Any]]:
-    email_header = request.headers.get("X-Goog-Authenticated-User-Email")
-    if not email_header:
-        return None
-    _issuer, _, email = email_header.partition(":")
-    email = email.strip().lower()
-    if not email:
-        return None
-
-    raw_uid = request.headers.get("X-Goog-Authenticated-User-Id", "")
-    _uid_issuer, _, uid = raw_uid.partition(":")
-    uid = uid or email
-
-    display_name = request.headers.get("X-Goog-Authenticated-User-Display-Name")
-    name = display_name or email.split("@")[0]
-
-    admin_emails = _admin_email_set()
-    role = "admin" if email in admin_emails else "member"
-
-    db_user = _sync_user_record(uid, email, name, role)
-    if db_user:
-        role = db_user.role or role
-        name = db_user.name or name
-
-    return {
-        "uid": uid,
-        "email": email,
-        "name": name,
-        "role": role,
-        "is_mfa": False,
-    }
 
 
 def _user_from_firebase_tokens() -> Optional[dict[str, Any]]:
@@ -184,12 +130,7 @@ def _user_from_firebase_tokens() -> Optional[dict[str, Any]]:
 
 
 def get_current_user() -> Optional[dict[str, Any]]:
-    backend = _get_auth_backend()
-    if backend == "firebase":
-        return _user_from_firebase_tokens()
-    if backend == "iap":
-        return _user_from_iap_headers()
-    return None
+    return _user_from_firebase_tokens()
 
 
 def get_current_user_from_token() -> Optional[dict[str, Any]]:
@@ -211,20 +152,17 @@ def require_roles(*roles: str):
 
     user = ensure_user()
     if not user:
-        backend = _get_auth_backend()
         logger.info(
             "Unauthenticated access attempt blocked",
             extra={
                 "auth_event": "auth_required_failure",
                 "path": request.path,
                 "ip": request.remote_addr,
-                "backend": backend,
+                "backend": "firebase",
             },
         )
-        if backend == "firebase":
-            login_url = url_for("auth.login", next=request.full_path)
-            return redirect(login_url, code=302)
-        abort(401, description="Authentication required. Access is managed by IAP.")
+        login_url = url_for("auth.login", next=request.full_path)
+        return redirect(login_url, code=302)
 
     if roles:
         allowed = {role.lower() for role in roles if role}

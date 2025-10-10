@@ -14,6 +14,7 @@ coverage.xml
 
 # Environment
 .env
+.env.prod
 
 # Logs
 deploy.log
@@ -28,6 +29,7 @@ deploy.log
 
 # Node
 node_modules/
+reports/
 
 # Build artifacts
 dist/
@@ -37,3 +39,8 @@ build/
 # Flask instance data
 instance/*
 !instance/.gitkeep
+env.yaml
+Thumbs.db
+.codex/
+.gemini/
+tools/
