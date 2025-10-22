@@ -244,7 +244,8 @@ section "Configuring health checks"
 gcloud run services update "$SERVICE_NAME" \
     --project="$GCP_PROJECT_ID" \
     --region="$GCP_REGION" \
-    --update-liveness-probe=http-path=/health,initial-delay-seconds=30 \
+    --update-liveness-probe=http-path=/healthz,initial-delay-seconds=30 \
+    --update-readiness-probe=http-path=/health,initial-delay-seconds=10 \
     --quiet
 
 section "Post-deploy steps"

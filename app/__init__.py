@@ -6,6 +6,7 @@ import firebase_admin  # type: ignore[import-untyped]
 import flask_limiter
 from dotenv import load_dotenv
 from flask import Flask, g, request, redirect, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app.extensions import cache, limiter
 from app.utils.firestore_cache import FirestoreCache
@@ -209,6 +210,7 @@ def create_app():
     #     )
 
     app = Flask(__name__, instance_relative_config=True)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
     # Wrap with whitenoise for static file serving
 
     # Instrument the Flask app
@@ -249,13 +251,15 @@ def create_app():
     ).strip()
     canonical_host = canonical_host.lower() or None
 
+    session_cookie_name = os.getenv("FLASK_SESSION_COOKIE_NAME", "flask_session")
+
     app.config.from_mapping(
         SECRET_KEY=secret_key,
         WTF_CSRF_ENABLED=True,
         WTF_CSRF_SECRET_KEY=csrf_config.secret_key,
         WTF_CSRF_TIME_LIMIT=csrf_config.time_limit_seconds,
-        SESSION_COOKIE_NAME="flask_session",
-        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_NAME=session_cookie_name,
+        SESSION_COOKIE_SECURE=flask_session_secure,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         AUTH_ENABLED=auth_enabled,
