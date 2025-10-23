@@ -3,10 +3,33 @@
 
 {% block title %}{{ bucket.name }} Items{% endblock %}
 
+{% block head %}
+    <link rel="alternate"
+          type="application/rss+xml"
+          title="Zissou – {{ bucket.name }} feed"
+          href="{{ url_for('feeds.bucket_feed', bucket_slug=bucket.slug, _external=True) }}">
+    <link rel="alternate"
+          type="application/rss+xml"
+          title="Zissou – {{ bucket.name }} links feed"
+          href="{{ url_for('feeds.bucket_links_feed', bucket_slug=bucket.slug, _external=True) }}">
+{% endblock %}
+
 {% block content %}
 <div class="container mx-auto px-4 py-8">
     <h1 class="text-3xl font-bold text-gray-900 mb-2">Bucket: {{ bucket.name }}</h1>
     <p class="text-gray-600 mb-6">{{ bucket.description }}</p>
+    <div class="mb-6 flex flex-wrap items-center gap-3 text-sm">
+        <a href="{{ url_for('feeds.bucket_feed', bucket_slug=bucket.slug) }}"
+           class="inline-flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/40">
+            Podcast RSS
+        </a>
+        <code class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">/feeds/{{ bucket.slug }}.xml</code>
+        <a href="{{ url_for('feeds.bucket_links_feed', bucket_slug=bucket.slug) }}"
+           class="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-2 font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-200 dark:hover:bg-emerald-900/40">
+            Links RSS
+        </a>
+        <code class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">/feeds/{{ bucket.slug }}.links.xml</code>
+    </div>
 
     {% include 'partials/_search_filter_bar.html' %}
 

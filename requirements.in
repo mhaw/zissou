@@ -1,11 +1,12 @@
-Flask>=3
-firebase-admin>=6.5.0
+Flask~=3.0.0
+firebase-admin~=6.5.0
 Flask-Caching==2.1.0
 gunicorn
-google-cloud-firestore
-google-cloud-storage
-google-cloud-texttospeech
-google-cloud-tasks
+google-cloud-firestore~=2.11.0
+google-cloud-storage~=2.10.0
+google-cloud-texttospeech~=2.14.0
+google-cloud-tasks~=2.13.0
+google-generativeai
 trafilatura
 newspaper3k
 beautifulsoup4
@@ -23,15 +24,9 @@ cachetools
 feedgen
 feedparser
 playwright
+rich<13
 
 requests
-black
-ruff
-mypy
-types-cachetools
-types-requests
-lxml-stubs
-types-python-dateutil
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-gcp-trace
@@ -39,3 +34,6 @@ opentelemetry-instrumentation-flask
 
 whitenoise
 redis>=5.0.0
+validators
+pydantic-settings
+pydantic-settings>=2.2,<3

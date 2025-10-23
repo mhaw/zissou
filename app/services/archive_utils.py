@@ -11,7 +11,12 @@ from typing import Callable, Optional
 from cachetools import TTLCache
 
 from app.services.firestore_helpers import normalise_timestamp
-from app.services.exceptions import ArchiveTimeout, NetworkError, ParseError, TruncatedError
+from app.services.exceptions import (
+    ArchiveTimeout,
+    NetworkError,
+    ParseError,
+    TruncatedError,
+)
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
@@ -19,6 +24,20 @@ logger = logging.getLogger(__name__)
 ArchiveFetcher = Callable[[str], dict]
 ExtractorFn = Callable[[str, str, Optional[str]], dict]
 IsTruncatedFn = Callable[[Optional[str]], bool]
+
+SERVICE_ARCHIVE_TODAY = "archive.today"
+SERVICE_WAYBACK = "wayback"
+
+EVENT_ARCHIVE_SKIP = "archive_skip"
+EVENT_ARCHIVE_CACHE_SEEDED = "archive_cache_seeded"
+EVENT_ARCHIVE_FAILURE = "archive_failure"
+EVENT_ARCHIVE_FETCH = "archive_fetch"
+EVENT_ARCHIVE_PROCESS = "archive_process"
+EVENT_ARCHIVE_RECOVERED = "archive_recovered"
+EVENT_ARCHIVE_RECOVER_START = "archive_recover_start"
+EVENT_ARCHIVE_RECOVER_SKIP_TINY_DEADLINE = "archive_recover_skip_tiny_deadline"
+EVENT_ARCHIVE_RECOVER_TIMEOUT = "archive_recover_timeout"
+EVENT_ARCHIVE_RECOVER_FINISH = "archive_recover_finish"
 
 ARCHIVE_TODAY_BASE_URL = os.getenv("ARCHIVE_TODAY_BASE_URL", "https://archive.today")
 WAYBACK_API_URL = os.getenv("WAYBACK_API_URL", "https://archive.org/wayback/available")
@@ -97,7 +116,7 @@ def _should_skip_archive(url: str) -> bool:
     if url in _failure_cache:
         _log_archive_event(
             {
-                "event": "archive_skip",
+                "event": EVENT_ARCHIVE_SKIP,
                 "url": url,
                 "reason": "local_cache",
             }
@@ -125,15 +144,26 @@ def _should_skip_archive(url: str) -> bool:
 
     now = datetime.now(timezone.utc)
     if expires_at > now:
+        already_cached = url in _failure_cache
         _failure_cache[url] = expires_at
+        if already_cached:
+            _log_archive_event(
+                {
+                    "event": EVENT_ARCHIVE_SKIP,
+                    "url": url,
+                    "reason": "failure_cache",
+                }
+            )
+            return True
+        # Seeded from Firestore but allow this attempt to revalidate.
         _log_archive_event(
             {
-                "event": "archive_skip",
+                "event": EVENT_ARCHIVE_CACHE_SEEDED,
                 "url": url,
                 "reason": "firestore_cache",
             }
         )
-        return True
+        return False
 
     try:
         doc_ref.delete()
@@ -145,7 +175,7 @@ def _should_skip_archive(url: str) -> bool:
 def _record_failure(url: str, reason: str) -> None:
     _log_archive_event(
         {
-            "event": "archive_failure",
+            "event": EVENT_ARCHIVE_FAILURE,
             "url": url,
             "reason": reason,
         }
@@ -155,7 +185,9 @@ def _record_failure(url: str, reason: str) -> None:
         return
     doc_id = _cache_key(url)
     doc_ref = _db.collection(ARCHIVE_FAILURE_COLLECTION).document(doc_id)
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ARCHIVE_FAILURE_TTL_SECONDS)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=ARCHIVE_FAILURE_TTL_SECONDS
+    )
     payload = {
         "url": url,
         "reason": reason,
@@ -186,11 +218,11 @@ def _enqueue_archive_snapshot(url: str, service: str) -> None:
 
 async def _fetch_archive_today(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     snapshot_url = f"{ARCHIVE_TODAY_BASE_URL.rstrip('/')}/latest/{url}"
-    await _rate_limiter.wait("archive.today")
+    await _rate_limiter.wait(SERVICE_ARCHIVE_TODAY)
     _log_archive_event(
         {
-            "event": "archive_fetch",
-            "service": "archive.today",
+            "event": EVENT_ARCHIVE_FETCH,
+            "service": SERVICE_ARCHIVE_TODAY,
             "url": url,
             "stage": "request",
         }
@@ -198,11 +230,11 @@ async def _fetch_archive_today(url: str, fetcher: ArchiveFetcher) -> Optional[di
     async with _semaphore:
         result = await asyncio.to_thread(fetcher, snapshot_url)
     if result.get("error"):
-        _enqueue_archive_snapshot(url, "archive.today")
+        _enqueue_archive_snapshot(url, SERVICE_ARCHIVE_TODAY)
         _log_archive_event(
             {
-                "event": "archive_fetch",
-                "service": "archive.today",
+                "event": EVENT_ARCHIVE_FETCH,
+                "service": SERVICE_ARCHIVE_TODAY,
                 "url": url,
                 "status": "error",
                 "error_type": NetworkError.__name__,
@@ -211,8 +243,8 @@ async def _fetch_archive_today(url: str, fetcher: ArchiveFetcher) -> Optional[di
         return None
     _log_archive_event(
         {
-            "event": "archive_fetch",
-            "service": "archive.today",
+            "event": EVENT_ARCHIVE_FETCH,
+            "service": SERVICE_ARCHIVE_TODAY,
             "url": url,
             "status": "retrieved",
         }
@@ -225,8 +257,8 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     await _rate_limiter.wait("wayback_api")
     _log_archive_event(
         {
-            "event": "archive_fetch",
-            "service": "wayback",
+            "event": EVENT_ARCHIVE_FETCH,
+            "service": SERVICE_WAYBACK,
             "url": url,
             "stage": "api",
         }
@@ -236,8 +268,8 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     if response.get("error"):
         _log_archive_event(
             {
-                "event": "archive_fetch",
-                "service": "wayback",
+                "event": EVENT_ARCHIVE_FETCH,
+                "service": SERVICE_WAYBACK,
                 "url": url,
                 "status": "error",
                 "error_type": NetworkError.__name__,
@@ -249,8 +281,8 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     except json.JSONDecodeError:
         _log_archive_event(
             {
-                "event": "archive_fetch",
-                "service": "wayback",
+                "event": EVENT_ARCHIVE_FETCH,
+                "service": SERVICE_WAYBACK,
                 "url": url,
                 "status": "error",
                 "error_type": ParseError.__name__,
@@ -262,11 +294,11 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     closest = snapshots.get("closest") if isinstance(snapshots, dict) else None
     snapshot_url = closest.get("url") if isinstance(closest, dict) else None
     if not snapshot_url:
-        _enqueue_archive_snapshot(url, "wayback")
+        _enqueue_archive_snapshot(url, SERVICE_WAYBACK)
         _log_archive_event(
             {
-                "event": "archive_fetch",
-                "service": "wayback",
+                "event": EVENT_ARCHIVE_FETCH,
+                "service": SERVICE_WAYBACK,
                 "url": url,
                 "status": "miss",
             }
@@ -276,8 +308,8 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     await _rate_limiter.wait("wayback_snapshot")
     _log_archive_event(
         {
-            "event": "archive_fetch",
-            "service": "wayback",
+            "event": EVENT_ARCHIVE_FETCH,
+            "service": SERVICE_WAYBACK,
             "url": url,
             "stage": "snapshot",
         }
@@ -287,8 +319,8 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
     if snapshot.get("error"):
         _log_archive_event(
             {
-                "event": "archive_fetch",
-                "service": "wayback",
+                "event": EVENT_ARCHIVE_FETCH,
+                "service": SERVICE_WAYBACK,
                 "url": url,
                 "status": "error",
                 "error_type": NetworkError.__name__,
@@ -297,8 +329,8 @@ async def _fetch_wayback(url: str, fetcher: ArchiveFetcher) -> Optional[dict]:
         return None
     _log_archive_event(
         {
-            "event": "archive_fetch",
-            "service": "wayback",
+            "event": EVENT_ARCHIVE_FETCH,
+            "service": SERVICE_WAYBACK,
             "url": url,
             "status": "retrieved",
         }
@@ -313,9 +345,9 @@ async def _attempt_archive(
     extractor: ExtractorFn,
     is_truncated: IsTruncatedFn,
 ) -> Optional[dict]:
-    if label == "archive.today":
+    if label == SERVICE_ARCHIVE_TODAY:
         snapshot = await _fetch_archive_today(url, fetcher)
-    elif label == "wayback":
+    elif label == SERVICE_WAYBACK:
         snapshot = await _fetch_wayback(url, fetcher)
     else:  # pragma: no cover - defensive
         logger.warning("Unknown archive service %s for %s", label, url)
@@ -333,7 +365,7 @@ async def _attempt_archive(
     if processed.get("error"):
         _log_archive_event(
             {
-                "event": "archive_process",
+                "event": EVENT_ARCHIVE_PROCESS,
                 "service": label,
                 "url": url,
                 "status": "error",
@@ -344,7 +376,7 @@ async def _attempt_archive(
     if is_truncated(processed.get("text")):
         _log_archive_event(
             {
-                "event": "archive_process",
+                "event": EVENT_ARCHIVE_PROCESS,
                 "service": label,
                 "url": url,
                 "status": "truncated",
@@ -358,7 +390,7 @@ async def _attempt_archive(
     recovered_length = len((processed.get("text") or "").strip())
     _log_archive_event(
         {
-            "event": "archive_recovered",
+            "event": EVENT_ARCHIVE_RECOVERED,
             "service": label,
             "url": url,
             "chars": recovered_length,
@@ -381,79 +413,69 @@ async def recover_truncated_content_async(
     if _should_skip_archive(url):
         return None
 
-    services = ("archive.today", "wayback")
-    start = time.perf_counter()
+    services = (SERVICE_ARCHIVE_TODAY, SERVICE_WAYBACK)
+    deadline = time.perf_counter() + ARCHIVE_TIMEOUT_SECONDS
     _log_archive_event(
         {
-            "event": "archive_recover_start",
+            "event": EVENT_ARCHIVE_RECOVER_START,
             "url": url,
             "services": list(services),
         }
     )
-    pending = {
-        asyncio.create_task(
-            _attempt_archive(service, url, fetcher, extractor, is_truncated)
-        ): service
-        for service in services
-    }
 
-    try:
-        while pending:
-            elapsed = time.perf_counter() - start
-            remaining = ARCHIVE_TIMEOUT_SECONDS - elapsed
-            if remaining <= 0:
-                raise asyncio.TimeoutError
-            done, _ = await asyncio.wait(
-                pending.keys(),
-                timeout=remaining,
-                return_when=asyncio.FIRST_COMPLETED,
+    for service in services:
+        MIN_ATTEMPT_SECONDS = 0.25  # Based on observed overhead
+        remaining = deadline - time.perf_counter()
+        if remaining <= MIN_ATTEMPT_SECONDS:
+            _log_archive_event(
+                {
+                    "event": EVENT_ARCHIVE_RECOVER_SKIP_TINY_DEADLINE,
+                    "url": url,
+                    "service": service,
+                    "remaining_seconds": remaining,
+                }
             )
-            if not done:
-                raise asyncio.TimeoutError
-            for task in done:
-                service = pending.pop(task)
-                try:
-                    result = task.result()
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning(
-                        "Archive lookup via %s failed for %s: %s", service, url, exc
-                    )
-                    continue
-                if result:
-                    _clear_failure(url)
-                    _log_archive_event(
-                        {
-                            "event": "archive_recover_finish",
-                            "url": url,
-                            "status": "success",
-                            "service": service,
-                        }
-                    )
-                    for future in pending:
-                        future.cancel()
-                    return result
-        _record_failure(url, "no_snapshot")
-        _log_archive_event(
-            {
-                "event": "archive_recover_finish",
-                "url": url,
-                "status": "failure",
-            }
-        )
-        return None
-    except asyncio.TimeoutError:
-        _record_failure(url, "timeout")
-        _log_archive_event(
-            {
-                "event": "archive_recover_timeout",
-                "url": url,
-                "error_type": ArchiveTimeout.__name__,
-            }
-        )
-        return None
-    finally:
-        for task in pending:
-            task.cancel()
+            break
+        try:
+            result = await asyncio.wait_for(
+                _attempt_archive(service, url, fetcher, extractor, is_truncated),
+                timeout=remaining,
+            )
+        except asyncio.TimeoutError:
+            _record_failure(url, "timeout")
+            _log_archive_event(
+                {
+                    "event": EVENT_ARCHIVE_RECOVER_TIMEOUT,
+                    "url": url,
+                    "error_type": ArchiveTimeout.__name__,
+                    "service": service,
+                }
+            )
+            return None
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Archive lookup via %s failed for %s: %s", service, url, exc)
+            continue
+        if result:
+            _clear_failure(url)
+            _log_archive_event(
+                {
+                    "event": EVENT_ARCHIVE_RECOVER_FINISH,
+                    "url": url,
+                    "status": "success",
+                    "service": service,
+                }
+            )
+            return result
+
+    _record_failure(url, "no_snapshot")
+    _log_archive_event(
+        {
+            "event": EVENT_ARCHIVE_RECOVER_FINISH,
+            "url": url,
+            "status": "failure",
+        }
+    )
+    return None
 
 
 def recover_truncated_content(

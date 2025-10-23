@@ -5,11 +5,12 @@
 {% block content %}
 <div class="max-w-xl mx-auto bg-white p-8 rounded-lg shadow-md">
     <h1 class="text-2xl font-bold mb-6 text-center">Add an Article to the Boombox</h1>
-    <form method="post">
+    <form method="post" id="new-item-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <div class="mb-4">
             <label for="url" class="block text-gray-700 text-sm font-bold mb-2">Article URL:</label>
             <input type="url" name="url" id="url" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="https://www.example.com/article" value="{{ prefill_url }}">
+            <p id="url-error" class="text-red-500 text-xs italic mt-2" style="display: none;"></p>
         </div>
         <div class="mb-6">
             <label for="voice" class="block text-gray-700 text-sm font-bold mb-2">Voice:</label>
@@ -65,6 +66,31 @@
 {{ super() }}
 <script nonce="{{ csp_nonce() }}">
     document.addEventListener('DOMContentLoaded', () => {
+        const form = document.getElementById('new-item-form');
+        const urlInput = document.getElementById('url');
+        const urlError = document.getElementById('url-error');
+
+        form.addEventListener('submit', (event) => {
+            const url = urlInput.value.trim();
+            if (!url) {
+                urlError.textContent = 'URL is required.';
+                urlError.style.display = 'block';
+                event.preventDefault();
+                return;
+            }
+
+            try {
+                new URL(url);
+            } catch (_) {
+                urlError.textContent = 'Please enter a valid URL.';
+                urlError.style.display = 'block';
+                event.preventDefault();
+                return;
+            }
+
+            urlError.style.display = 'none';
+        });
+
         const copyButton = document.querySelector('[data-copy-bookmarklet]');
         const feedback = document.querySelector('[data-bookmarklet-feedback]');
         if (!copyButton || !navigator.clipboard) {

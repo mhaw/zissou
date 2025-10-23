@@ -172,7 +172,7 @@ def init_extensions(app, default_timeout: int) -> None:
     app.logger.info("Rate limiter storage: %s", app.config["RATELIMIT_STORAGE_URI"])
 
 
-def create_app():
+def create_app(test_config=None):
     """Create and configure an instance of the Flask application."""
     load_dotenv()
 
@@ -243,9 +243,13 @@ def create_app():
         )
 
     admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
-    admin_emails = [
-        email.strip().lower() for email in admin_emails_raw.split(",") if email.strip()
-    ]
+    if admin_emails_raw:
+        admin_emails = [
+            email.strip().lower() for email in admin_emails_raw.split(",") if email.strip()
+        ]
+    else:
+        admin_emails = []
+
     canonical_host = (
         os.getenv("CANONICAL_HOST") or os.getenv("CANON_DOMAIN") or ""
     ).strip()
@@ -266,7 +270,17 @@ def create_app():
         FIREBASE_AUTH_CONFIG=firebase_auth_config,
         RATELIMIT_STORAGE_URI=os.getenv("RATELIMIT_STORAGE_URI"),
         CANONICAL_HOST=canonical_host,
+        ADMIN_EMAILS=admin_emails,
     )
+
+    if test_config:
+        app.config.update(test_config)
+
+    if app.config.get("TESTING"):
+        app.config.update(
+            LOGIN_DISABLED=False,
+            WTF_CSRF_ENABLED=False,
+        )
 
     from app.utils.firestore_session import FirestoreSessionInterface
     from google.cloud import firestore
@@ -317,9 +331,12 @@ def create_app():
 
     # New: CORS configuration
     allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "").strip()
-    allowed_origins = [
-        origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()
-    ]
+    if allowed_origins_raw:
+        allowed_origins = [
+            origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()
+        ]
+    else:
+        allowed_origins = []
     # Add default origins for local development and Cloud Run
     if "http://localhost:5000" not in allowed_origins:
         allowed_origins.append("http://localhost:5000")
@@ -454,7 +471,7 @@ def create_app():
     # Conditionally register the task handler blueprint
     # This is to avoid running the task handler in a local dev environment
     # where it is not needed and may not have the right credentials.
-    if os.getenv("ENV") != "development":
+    if os.getenv("ENV") != "development" or app.config.get("TESTING"):
         from .routes import tasks
 
         app.register_blueprint(tasks.bp)

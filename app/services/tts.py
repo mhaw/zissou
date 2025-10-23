@@ -150,6 +150,41 @@ VOICE_PROFILES = {
         "speaking_rate": 0.9,
         "pitch": -2.0,
     },
+    "us-journey-female": {
+        "name": "en-US-Journey-F",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "Journey (US English, Female)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "us-journey-male": {
+        "name": "en-US-Journey-M",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "Journey (US English, Male)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "uk-news-male": {
+        "name": "en-GB-News-J",
+        "gender": texttospeech.SsmlVoiceGender.MALE,
+        "description": "News (UK English, Male)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "au-news-female": {
+        "name": "en-AU-News-E",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "News (AU English, Female)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
+    "in-wavenet-female": {
+        "name": "en-IN-Wavenet-B",
+        "gender": texttospeech.SsmlVoiceGender.FEMALE,
+        "description": "Wavenet (Indian English, Female)",
+        "speaking_rate": 1.0,
+        "pitch": 0.0,
+    },
 }
 
 _AUDIO_FORMATS = {

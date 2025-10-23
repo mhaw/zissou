@@ -3,50 +3,145 @@
 {% block title %}Processing Article{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md text-center">
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md text-center transition-colors duration-300 dark:bg-slate-800 dark:text-slate-100 dark:border dark:border-slate-700">
     <h1 class="text-3xl font-bold mb-4">Processing Your Article...</h1>
-    <p class="text-gray-600 mb-6">This may take a moment. Please do not close this page.</p>
+    <p class="text-gray-600 mb-6">Hang tight—we&apos;ll redirect as soon as narration wraps up.</p>
 
-    <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mx-auto mb-6"></div>
+    <div id="progress-spinner" class="flex items-center justify-center mb-6">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500"></div>
+    </div>
 
-    <p id="status-message" class="text-lg font-semibold text-blue-700">Starting...</p>
-    <p id="error-message" class="text-red-500 mt-4"></p>
+    <div class="mb-4">
+        <p id="status-message" class="text-lg font-semibold text-blue-700">Status: queued</p>
+        <p id="error-message" class="text-sm text-red-500 mt-2 hidden"></p>
+    </div>
 
-    <script nonce="{{ csp_nonce() }}">
-        const taskId = "{{ task_id }}";
-        const statusMessage = document.getElementById('status-message');
-        const errorMessage = document.getElementById('error-message');
-        let intervalId;
-
-        const fetchStatus = async () => {
-            try {
-                const response = await fetch(`/status/${taskId}`);
-                const data = await response.json();
-
-                const formattedStatus = data.status.replace(/_/g, ' ').toLowerCase();
-                statusMessage.textContent = `Status: ${formattedStatus.charAt(0).toUpperCase() + formattedStatus.slice(1)}`;
-
-
-                if (data.status === 'COMPLETED') {
-                    clearInterval(intervalId);
-                    statusMessage.textContent = 'Processing complete! Redirecting...';
-                    window.location.href = `/items/${data.item_id}`;
-                } else if (data.status === 'FAILED') {
-                    clearInterval(intervalId);
-                    statusMessage.textContent = 'Processing failed.';
-                    errorMessage.textContent = `Error: ${data.error || 'An unknown error occurred.'}`;
-                }
-            } catch (error) {
-                clearInterval(intervalId);
-                statusMessage.textContent = 'Failed to fetch status.';
-                errorMessage.textContent = `Network error: ${error.message}`;
-                console.error('Error fetching status:', error);
-            }
-        };
-
-        // Fetch status immediately and then every 2 seconds
-        fetchStatus();
-        intervalId = setInterval(fetchStatus, 2000);
-    </script>
+    <div class="mt-4">
+        <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+            <div id="progress-bar" class="bg-blue-500 h-3 w-0 transition-all duration-500 ease-out"></div>
+        </div>
+        <p id="progress-label" class="text-sm text-gray-500 mt-2">0% complete</p>
+    </div>
 </div>
+
+<div id="progress-toast" class="fixed inset-x-0 bottom-6 flex justify-center pointer-events-none hidden">
+    <div class="bg-emerald-600 text-white text-sm px-4 py-3 rounded-full shadow-lg flex items-center gap-2 pointer-events-auto">
+        <span class="inline-flex h-2 w-2 rounded-full bg-white animate-pulse"></span>
+        <span id="toast-message">Processing complete!</span>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce() }}">
+    const taskId = "{{ task_id }}";
+    const statusOrder = [
+        "QUEUED",
+        "VALIDATING_INPUT",
+        "CHECKING_EXISTING",
+        "PARSING",
+        "CONVERTING_AUDIO",
+        "UPLOADING_AUDIO",
+        "SAVING_ITEM",
+        "COMPLETED"
+    ];
+    const pollIntervalMs = 4000;
+    const redirectDelayMs = 2000;
+    const statusMessage = document.getElementById('status-message');
+    const errorMessage = document.getElementById('error-message');
+    const progressBar = document.getElementById('progress-bar');
+    const progressLabel = document.getElementById('progress-label');
+    const spinner = document.getElementById('progress-spinner');
+    const toast = document.getElementById('progress-toast');
+    const toastMessage = document.getElementById('toast-message');
+    let pollTimer = null;
+
+    function formatStatus(status) {
+        const readable = status.replace(/_/g, ' ').toLowerCase();
+        return readable.charAt(0).toUpperCase() + readable.slice(1);
+    }
+
+    function setProgress(status) {
+        const index = statusOrder.indexOf(status);
+        const maxIndex = statusOrder.length - 1;
+        const percent = index >= 0 ? Math.round((index / maxIndex) * 100) : 0;
+        progressBar.style.width = `${percent}%`;
+        progressLabel.textContent = `${percent}% complete`;
+    }
+
+    function showToast(message) {
+        toastMessage.textContent = message;
+        toast.classList.remove('hidden');
+    }
+
+    function hideToast() {
+        toast.classList.add('hidden');
+    }
+
+    async function fetchStatus() {
+        try {
+            const response = await fetch(`/status/${taskId}`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                credentials: 'same-origin'
+            });
+
+            if (response.status === 404) {
+                clearInterval(pollTimer);
+                spinner.classList.add('hidden');
+                statusMessage.textContent = 'Status: Not found';
+                errorMessage.textContent = 'We could not locate this task. It may have expired.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(`Unexpected status ${response.status}`);
+            }
+
+            const data = await response.json();
+            const normalizedStatus = (data.status || '').toUpperCase();
+
+            setProgress(normalizedStatus);
+            statusMessage.textContent = `Status: ${formatStatus(normalizedStatus)}`;
+            errorMessage.classList.add('hidden');
+
+            if (normalizedStatus === 'COMPLETED') {
+                clearInterval(pollTimer);
+                spinner.classList.add('hidden');
+                showToast('Processing complete! Redirecting…');
+                setProgress('COMPLETED');
+                setTimeout(() => {
+                    hideToast();
+                    if (data.item_id) {
+                        window.location.href = `/items/${data.item_id}`;
+                    }
+                }, redirectDelayMs);
+            } else if (normalizedStatus === 'FAILED') {
+                clearInterval(pollTimer);
+                spinner.classList.add('hidden');
+                statusMessage.textContent = 'Status: Failed';
+                errorMessage.textContent = data.error || 'An unknown error occurred.';
+                errorMessage.classList.remove('hidden');
+            } else if (normalizedStatus === 'NOT_FOUND') {
+                clearInterval(pollTimer);
+                spinner.classList.add('hidden');
+                statusMessage.textContent = 'Status: Not found';
+                errorMessage.textContent = 'We could not locate this task. It may have expired.';
+                errorMessage.classList.remove('hidden');
+            }
+        } catch (error) {
+            clearInterval(pollTimer);
+            spinner.classList.add('hidden');
+            statusMessage.textContent = 'Status: Paused';
+            errorMessage.textContent = `Unable to fetch progress: ${error.message}`;
+            errorMessage.classList.remove('hidden');
+            console.error('Error fetching status:', error);
+        }
+    }
+
+    setProgress('QUEUED');
+    fetchStatus();
+    pollTimer = setInterval(fetchStatus, pollIntervalMs);
+</script>
 {% endblock %}

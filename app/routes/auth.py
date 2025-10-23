@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from flask import (
     Blueprint,
-    abort,
     current_app,
     flash,
     g,

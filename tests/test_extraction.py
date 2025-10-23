@@ -214,6 +214,7 @@ def test_archive_recovery_caches_failure(monkeypatch):
 def test_archive_recovery_times_out(monkeypatch):
     archive_utils._failure_cache.clear()
     monkeypatch.setattr(archive_utils, "ARCHIVE_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(archive_utils, "_should_skip_archive", lambda url: False)
 
     def slow_fetcher(url):
         time.sleep(0.05)

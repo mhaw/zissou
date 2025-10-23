@@ -2,6 +2,9 @@
 
 Zissou turns articles into your own personal podcast. Provide a URL, and it will extract the text, convert it to high-quality audio, and generate a private RSS feed you can add to your favorite podcast player.
 
+- Optional AI summaries and auto-tagging keep Firestore items enriched without delaying TTS.
+- A dark mode toggle in the navbar respects system defaults and persists per browser.
+
 ## Architecture Overview
 
 The application is a Python Flask web server that runs on Google Cloud Run. It uses Google Cloud Tasks for asynchronous background processing.
@@ -133,19 +136,39 @@ This command builds the container, pushes it to the Artifact Registry, and deplo
 
 The script will output the URL of your deployed service.
 
-### Step 2b: Ensure Firestore Indexes
+### Step 2b: Deploy Firestore Indexes & Rules
 
-Run the composite index definitions in `firestore.indexes.json` after each deploy so the API queries stay happy. The duplicate-protection query uses a `sourceUrl` + `createdAt` index; create it with:
+The API depends on a handful of composite indexes plus per-user security rules so one account cannot read or mutate another user's library. Both artifacts live in the repo (`firestore.indexes.json`, `firestore.rules`)—reapply them any time a change lands in main.
+
+**Using the Firebase CLI (recommended):**
 
 ```bash
+firebase deploy --only firestore:indexes,firestore:rules
+```
+
+Need to propagate just the indexes? Run:
+
+```bash
+firebase deploy --only firestore:indexes
+```
+
+**Using `gcloud` directly:**
+
+```bash
+# Apply the duplicate-protection index used during task submission
 gcloud firestore indexes composite create \
   --collection-group=items \
   --query-scope=COLLECTION \
   --field-config=field-path=sourceUrl,order=ASCENDING \
   --field-config=field-path=createdAt,order=DESCENDING
+
+# Repeat as needed for any additional entries in firestore.indexes.json
+
+# Update security rules to enforce per-user isolation
+gcloud firestore security-rules update firestore.rules
 ```
 
-You can also apply the whole file with the Firebase console or `firebase deploy --only firestore:indexes`. Re-running the command is safe—Firestore will no-op if the index already exists.
+Re-running either path is safe. Firestore skips indexes that already exist, and rules updates are atomic.
 
 ### Step 3: Configure Service URL
 
@@ -198,6 +221,13 @@ For more advanced configuration, you can edit the `VOICE_PROFILES` dictionary in
 ### Resilient Fetching and Archive Recovery
 
 The parser now retries transient HTTP failures with randomized browser-like headers, exponential backoff, and `Retry-After` support. When direct extraction looks truncated (short body, paywall copy, etc.), Zissou will attempt to reuse an archived snapshot from archive.today and then the Wayback Machine. Snapshot creation hooks are stubbed so you can wire them into Cloud Tasks or Celery without changing the parser.
+
+### AI Summaries & Auto Tagging
+
+- `ENABLE_SUMMARY=true` enables asynchronous article summarisation. Choose a provider with `SUMMARY_PROVIDER=openai|gemini` and supply the relevant API key (`OPENAI_API_KEY` or `GEMINI_API_KEY`). Optional overrides: `SUMMARY_MODEL` and `SUMMARY_MAX_WORDS`.
+- `ENABLE_AUTO_TAGS=true` generates `auto_tags` for each item after processing. Configure `AUTO_TAG_PROVIDER=openai|gemini` and, if desired, `AUTO_TAG_MODEL` or `AUTO_TAG_LIMIT`.
+- Without a provider or API key the services fall back to lightweight, on-box heuristics so the pipeline stays non-blocking.
+- Set `AI_ENRICHMENT_MAX_WORKERS` (default 2) and `AI_ENRICHMENT_MAX_CHARS` (default 12000) to cap concurrency and context length for cost control.
 
 Key environment variables:
 - `FETCH_MAX_RETRIES`, `FETCH_BACKOFF_FACTOR`, `FETCH_MAX_BACKOFF_SECONDS` – tune retry cadence.

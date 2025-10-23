@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}{{ metadata.title }} - Zissou{% endblock %}
+
+{% block head %}
+    <link rel="alternate" type="application/rss+xml" title="{{ metadata.title }}" href="{{ rss_url }}">
+    <meta property="og:title" content="{{ metadata.title }}">
+    <meta property="og:description" content="{{ metadata.description }}">
+    {% if metadata.image_url %}
+    <meta property="og:image" content="{{ metadata.image_url }}">
+    {% endif %}
+    <meta property="og:url" content="{{ metadata.page_url }}">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ metadata.title }}">
+    <meta name="twitter:description" content="{{ metadata.description }}">
+    {% if metadata.image_url %}
+    <meta name="twitter:image" content="{{ metadata.image_url }}">
+    {% endif %}
+    <script type="application/ld+json">
+        {{ schema_json | safe }}
+    </script>
+{% endblock %}
+
+{% block content %}
+<section class="max-w-4xl mx-auto space-y-8">
+    <header class="bg-white dark:bg-slate-800 rounded-xl shadow p-6 border border-slate-200/60 dark:border-slate-700">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div class="flex items-start gap-4">
+                {% if metadata.image_url %}
+                <img src="{{ metadata.image_url }}" alt="{{ metadata.title }} artwork"
+                     class="w-24 h-24 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shadow"
+                     loading="lazy">
+                {% endif %}
+                <div>
+                    <h1 class="text-3xl font-bold text-slate-900 dark:text-slate-100">{{ metadata.title }}</h1>
+                    <p class="mt-2 text-slate-600 dark:text-slate-300">{{ metadata.description }}</p>
+                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        Subscribe via RSS:
+                        <a href="{{ rss_url }}" class="text-blue-600 hover:underline break-all">{{ rss_url }}</a>
+                    </p>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-3">
+                {% if subscription_links.apple %}
+                <a href="{{ subscription_links.apple }}" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm font-semibold shadow hover:bg-slate-900" target="_blank" rel="noopener">
+                    Apple Podcasts
+                </a>
+                {% endif %}
+                {% if subscription_links.spotify %}
+                <a href="{{ subscription_links.spotify }}" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-500 text-white text-sm font-semibold shadow hover:bg-green-600" target="_blank" rel="noopener">
+                    Spotify
+                </a>
+                {% endif %}
+                {% if subscription_links.pocketcasts %}
+                <a href="{{ subscription_links.pocketcasts }}" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500 text-white text-sm font-semibold shadow hover:bg-red-600" target="_blank" rel="noopener">
+                    Pocket Casts
+                </a>
+                {% endif %}
+                {% if subscription_links.google %}
+                <a href="{{ subscription_links.google }}" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500 text-white text-sm font-semibold shadow hover:bg-blue-600" target="_blank" rel="noopener">
+                    Google Podcasts
+                </a>
+                {% endif %}
+                <a href="{{ subscription_links.rss }}" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-200 text-slate-800 text-sm font-semibold shadow hover:bg-slate-300" target="_blank" rel="noopener">
+                    RSS
+                </a>
+            </div>
+        </div>
+    </header>
+
+    {% if metadata.tag %}
+    <div class="bg-amber-50 dark:bg-slate-800/60 border border-amber-200 dark:border-amber-400/40 rounded-lg p-4 text-sm text-amber-900 dark:text-amber-200">
+        Showing episodes tagged with <strong>{{ metadata.tag }}</strong>.
+    </div>
+    {% endif %}
+
+    <div class="space-y-6">
+        {% for item in items %}
+        <article class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200/60 dark:border-slate-700 overflow-hidden">
+            <div class="p-6 space-y-4">
+                <header class="space-y-1">
+                    <h2 class="text-2xl font-semibold text-slate-900 dark:text-slate-100">{{ item.title or 'Untitled Episode' }}</h2>
+                    <p class="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                        {% set published = item.publishedAt or item.createdAt %}
+                        {% if published %}
+                        <span>{{ published|format_datetime }}</span>
+                        {% endif %}
+                        {% if item.durationSeconds %}
+                        <span aria-hidden="true">&middot;</span>
+                        <span>{{ item.durationSeconds|format_duration }}</span>
+                        {% endif %}
+                    </p>
+                </header>
+
+                {% if item.imageUrl or metadata.image_url %}
+                <img src="{{ item.imageUrl or metadata.image_url }}" alt="" class="w-full max-h-64 object-cover rounded-lg border border-slate-200 dark:border-slate-700" loading="lazy">
+                {% endif %}
+
+                {% if item.audioUrl %}
+                <div class="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
+                    <audio controls preload="none" class="w-full" title="Play {{ item.title or 'this episode' }}">
+                        <source src="{{ item.audioUrl }}" type="{{ item.audioMimeType or 'audio/mpeg' }}">
+                        Your browser does not support the audio element.
+                    </audio>
+                </div>
+                {% endif %}
+
+                {% set summary = item.summary_text or item.text %}
+                {% if summary %}
+                <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+                    {{ summary | replace('\n\n', '\n') | truncate(320, True, '...') }}
+                </p>
+                {% endif %}
+
+                <footer class="flex flex-wrap items-center gap-3">
+                    {% if item.sourceUrl %}
+                    <a href="{{ item.sourceUrl }}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-sm font-medium">
+                        View original article
+                    </a>
+                    {% endif %}
+                    {% if item.tags %}
+                    <div class="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        {% for tag_value in item.tags %}
+                        <span class="uppercase tracking-wide bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded">#{{ tag_value }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </footer>
+            </div>
+        </article>
+        {% else %}
+        <p class="text-center text-slate-600 dark:text-slate-300">No episodes available yet. Check back soon!</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
+
+from google.api_core.exceptions import FailedPrecondition
 
 
 def ensure_db_client(
@@ -21,6 +24,17 @@ def clear_cached_functions(*functions: Iterable[Callable]) -> None:
         cache_obj = getattr(fn, "cache", None)
         if cache_obj and hasattr(cache_obj, "clear"):
             cache_obj.clear()
+
+
+def extract_index_url(error: FailedPrecondition) -> str | None:
+    """Extract the Firestore index creation URL from a `FailedPrecondition` error message."""
+    match = re.search(
+        r"(https://console.firebase.google.com/project/[^/]+/database/firestore/indexes\?create_composite=.*)",
+        str(error),
+    )
+    if match:
+        return match.group(1)
+    return None
 
 
 def normalise_timestamp(value: Any) -> datetime | None:

@@ -15,7 +15,7 @@ from app.services import (
     tasks as tasks_service,
     users as users_service,
 )
-from app.services.items import FirestoreError
+from app.services.firestore_client import FirestoreError
 from app.services.storage import StorageError
 from app.services.tts import VOICE_PROFILES
 from app.services.tasks import (
@@ -26,6 +26,7 @@ from app.services.tasks import (
     STATUS_FILTER_OPTIONS,
     STATUS_LABELS,
 )
+from app.utils.http import get_safe_redirect
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 logger = logging.getLogger(__name__)
@@ -249,9 +250,9 @@ def retry_processing(task_id):
 
 @bp.route("/items/<item_id>/delete", methods=["POST"])
 def delete_item(item_id: str):
-    redirect_target = request.form.get("return_to") or url_for("admin.index")
-    if not redirect_target.startswith("/"):
-        redirect_target = url_for("admin.index")
+    redirect_target = get_safe_redirect(
+        request.form.get("return_to"), default_endpoint="admin.index"
+    )
 
     item = items_service.get_item(item_id)
     if not item:

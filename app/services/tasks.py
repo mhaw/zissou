@@ -1,8 +1,9 @@
 import os
 import json
-import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
+from typing import Optional, Any, Callable
+
+import structlog
 
 from google.cloud import firestore  # type: ignore[attr-defined]
 from google.cloud.exceptions import GoogleCloudError
@@ -10,10 +11,17 @@ from google.cloud.firestore_v1 import FieldFilter
 from google.cloud.tasks_v2 import CloudTasksClient
 
 from app.models.task import Task
-from app.services.items import db, FirestoreError
+from app.services import buckets as buckets_service
+from app.services.firestore_client import db, FirestoreError
+from app.utils.correlation import (
+    bind_request_context,
+    bind_task_context,
+    ensure_correlation_id,
+    update_context,
+)
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 TASKS_COLLECTION = os.getenv("FIRESTORE_COLLECTION_TASKS", "tasks")
 
@@ -98,7 +106,8 @@ def _run_count(query):
                     return aggregation_result.aggregate_fields.get("count", 0)
     except (GoogleCloudError, AttributeError):
         logger.debug(
-            "Count aggregation not available, falling back to streaming query."
+            "tasks.count_fallback",
+            reason="aggregation_not_available",
         )
     return sum(1 for _ in query.stream())
 
@@ -111,8 +120,23 @@ def create_cloud_task(task_payload: dict):
     service_url = os.getenv("SERVICE_URL")
     sa_email = os.getenv("SERVICE_ACCOUNT_EMAIL")
 
-    if not all([project, location, queue, service_url, sa_email]):
-        logger.error("Cloud Tasks environment variables not fully configured.")
+    correlation_id = ensure_correlation_id(task_payload.get("correlation_id"))
+    bind_task_context(task_id=task_payload.get("task_id"))
+    bind_request_context(url=task_payload.get("url"))
+
+    required_env = {
+        "GCP_PROJECT_ID": project,
+        "CLOUD_TASKS_LOCATION": location,
+        "CLOUD_TASKS_QUEUE": queue,
+        "SERVICE_URL": service_url,
+        "SERVICE_ACCOUNT_EMAIL": sa_email,
+    }
+    missing = sorted(key for key, value in required_env.items() if not value)
+    if missing:
+        logger.error(
+            "tasks.cloud_task_config_missing",
+            missing=missing,
+        )
         raise ValueError("Cloud Tasks environment is not configured.")
 
     client = CloudTasksClient()
@@ -122,7 +146,10 @@ def create_cloud_task(task_payload: dict):
         "http_request": {
             "http_method": "POST",
             "url": f"{service_url}/tasks/process",
-            "headers": {"Content-type": "application/json"},
+            "headers": {
+                "Content-type": "application/json",
+                "X-Correlation-ID": correlation_id,
+            },
             "oidc_token": {
                 "service_account_email": sa_email,
             },
@@ -132,10 +159,18 @@ def create_cloud_task(task_payload: dict):
 
     try:
         response = client.create_task(parent=parent, task=task)  # type: ignore[arg-type]
-        logger.info(f"Created Cloud Task: {response.name}")
+        logger.info(
+            "tasks.cloud_task_created",
+            queue=queue,
+            task_name=response.name,
+        )
         return response
-    except GoogleCloudError as e:
-        logger.exception(f"Error creating Cloud Task: {e}")
+    except GoogleCloudError as exc:
+        logger.exception(
+            "tasks.cloud_task_create_failed",
+            queue=queue,
+            error=str(exc),
+        )
         raise
 
 
@@ -151,6 +186,8 @@ def create_task(
     In a local dev environment, processes the task synchronously.
     """
     _ensure_db_client()
+    bind_request_context(url=url)
+    update_context(status="QUEUED")
     try:
         if user:
             default_voice = (
@@ -169,6 +206,10 @@ def create_task(
             if default_bucket and not bucket_id:
                 bucket_id = default_bucket
 
+        resolved_bucket_id, bucket_slug = normalize_bucket_reference(bucket_id)
+        bucket_id = resolved_bucket_id or bucket_id
+        bucket_slug = bucket_slug or (bucket_id if bucket_id else None)
+
         task = Task(sourceUrl=url, voice=voice, bucket_id=bucket_id)
         if user:
             task.userId = (
@@ -186,7 +227,11 @@ def create_task(
                 .stream()
             )
         except GoogleCloudError as exc:
-            logger.warning("Failed to check for duplicate tasks on %s: %s", url, exc)
+            logger.warning(
+                "tasks.duplicate_lookup_failed",
+                url=url,
+                error=str(exc),
+            )
             potential_duplicates = []
 
         for duplicate in potential_duplicates:
@@ -198,30 +243,46 @@ def create_task(
                 continue
             if voice and candidate_voice and candidate_voice != voice:
                 continue
-            if bucket_id and candidate_bucket and candidate_bucket != bucket_id:
-                continue
+            if bucket_id:
+                candidate_bucket_id, _ = normalize_bucket_reference(candidate_bucket)
+                if candidate_bucket_id and candidate_bucket_id != bucket_id:
+                    continue
+                if (
+                    candidate_bucket
+                    and not candidate_bucket_id
+                    and candidate_bucket != bucket_id
+                ):
+                    continue
+            bind_task_context(task_id=duplicate.id)
             logger.info(
-                "Reusing active task %s for %s instead of enqueuing duplicate",
-                duplicate.id,
-                url,
+                "tasks.duplicate_task_reused",
+                existing_task_id=duplicate.id,
+                url=url,
             )
             return duplicate.id
 
         task_ref = tasks_ref.document()
         task.id = task_ref.id
+        bind_task_context(task_id=task.id)
 
         # Local development: process synchronously
         if os.getenv("ENV") == "development":
             from app.routes.tasks import process_article_task
 
-            logger.info(f"Processing task {task.id} synchronously in local dev.")
+            logger.info(
+                "tasks.local_dev_processing",
+                task_id=task.id,
+                url=url,
+            )
             task.status = "PROCESSING"
+            update_context(status=task.status)
             task_ref.set(task.to_dict())
             process_article_task(task.id, url, voice, bucket_id, task.userId)
             return task.id
 
         # Deployed environment: enqueue to Cloud Tasks
         task.status = "QUEUED"
+        update_context(status=task.status)
         task_ref.set(task.to_dict())
 
         task_payload = {
@@ -229,14 +290,25 @@ def create_task(
             "url": url,
             "voice": voice,
             "bucket_id": bucket_id,
+            "bucket_slug": bucket_slug,
             "user_id": task.userId,
+            "correlation_id": ensure_correlation_id(),
         }
         create_cloud_task(task_payload)
+        logger.info(
+            "tasks.task_enqueued",
+            task_id=task.id,
+            url=url,
+        )
 
         return task.id
 
     except GoogleCloudError as e:
-        logger.error(f"Firestore error creating task for url {url}: {e}")
+        logger.error(
+            "tasks.firestore_create_failed",
+            url=url,
+            error=str(e),
+        )
         raise FirestoreError(f"Failed to create task for url {url}.") from e
     except Exception as e:
         logger.exception(f"An unexpected error occurred creating task for url {url}")
@@ -299,11 +371,14 @@ def retry_task(task: Task) -> str:
     }
     task_ref.update(update_fields)
 
+    resolved_bucket_id, bucket_slug = normalize_bucket_reference(task.bucket_id)
+
     payload = {
         "task_id": task.id,
         "url": task.sourceUrl,
         "voice": task.voice,
-        "bucket_id": task.bucket_id,
+        "bucket_id": resolved_bucket_id or task.bucket_id,
+        "bucket_slug": bucket_slug,
     }
     create_cloud_task(payload)
     return task.id
@@ -419,7 +494,9 @@ def _build_index_hint(
     if status:
         fields.append({"fieldPath": "status", "order": "ASCENDING"})
 
-    direction = "DESCENDING" if sort_direction == firestore.Query.DESCENDING else "ASCENDING"
+    direction = (
+        "DESCENDING" if sort_direction == firestore.Query.DESCENDING else "ASCENDING"
+    )
     fields.append({"fieldPath": sort_field, "order": direction})
 
     return {
@@ -440,7 +517,9 @@ def list_tasks(
     _ensure_db_client()
     sort_field = sort.lstrip("-")
     sort_direction = (
-        firestore.Query.DESCENDING if sort.startswith("-") else firestore.Query.ASCENDING
+        firestore.Query.DESCENDING
+        if sort.startswith("-")
+        else firestore.Query.ASCENDING
     )
     try:
         tasks_ref = db.collection(TASKS_COLLECTION)
@@ -557,3 +636,41 @@ def detach_item_from_tasks(item_id: str) -> int:
         raise FirestoreError(
             f"An unexpected error occurred while detaching item {item_id} from tasks."
         ) from e
+
+
+def normalize_bucket_reference(
+    bucket_identifier: str | None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a bucket identifier (id or slug) to canonical id/slug."""
+    if not bucket_identifier:
+        return None, None
+    candidate = bucket_identifier.strip()
+    if not candidate:
+        return None, None
+
+    lookups: list[tuple[Callable[[str], Optional[Any]], str]] = [
+        (buckets_service.get_bucket, candidate),
+        (buckets_service.get_bucket_by_slug, candidate),
+    ]
+    lower_candidate = candidate.lower()
+    if lower_candidate != candidate:
+        lookups.append((buckets_service.get_bucket_by_slug, lower_candidate))
+
+    for lookup_fn, value in lookups:
+        try:
+            bucket = lookup_fn(value)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.warning(
+                "tasks.bucket_lookup_error",
+                bucket_reference=value,
+                error=str(exc),
+            )
+            return candidate, None
+        if bucket:
+            return bucket.id, bucket.slug or bucket.id
+
+    logger.warning(
+        "tasks.bucket_lookup_failed",
+        bucket_reference=candidate,
+    )
+    return candidate, None

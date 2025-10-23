@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 @dataclass(frozen=True)
 class FirebaseAuthConfig:
@@ -54,3 +56,23 @@ class CSRFConfig:
             secret_key=os.getenv("CSRF_SECRET_KEY", "a-different-secret-key"),
             time_limit_seconds=time_limit,
         )
+
+
+class AppSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    ENV: str = "development"
+    AUTH_ENABLED: bool = False
+    GCP_PROJECT_ID: str | None = None
+    GCS_BUCKET: str | None = None
+    ADMIN_EMAILS: str = ""
+    ALLOWED_ORIGINS: str = ""
+
+
+settings = AppSettings()
+
+
+class AppConfig:
+    FIRESTORE_COLLECTION_ITEMS = os.getenv("FIRESTORE_COLLECTION_ITEMS", "items")

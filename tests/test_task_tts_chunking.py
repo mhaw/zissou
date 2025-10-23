@@ -21,6 +21,13 @@ def _fake_fragment_builder(text: str, break_after: bool = False) -> str:
     return f"<speak>{processed}</speak>"
 
 
+def expanding_fragment(text: str, break_after: bool = False) -> str:
+    payload = f'<p><prosody rate="slow">{text}</prosody></p>'
+    if break_after:
+        payload += ' <break time="500ms"/>'
+    return f"<speak>{payload}</speak>"
+
+
 def test_ssml_fragments_stay_within_limit(monkeypatch):
     chunker = _load_chunker(monkeypatch)
     text = "AI SaaS RSS data." * 400
@@ -81,6 +88,30 @@ def test_text_split_into_multiple_fragments(monkeypatch, chunk_bytes):
     fragments = chunker.text_to_ssml_fragments(text, _fake_fragment_builder)
 
     assert len(fragments) > 1
+    assert all(
+        len(fragment.encode("utf-8")) <= chunker.GOOGLE_TTS_MAX_INPUT_BYTES
+        for fragment in fragments
+    )
+
+
+def test_text_to_ssml_fragments_reduces_chunk_target_on_expansion(monkeypatch, caplog):
+    chunker = _load_chunker(
+        monkeypatch,
+        GOOGLE_TTS_MAX_INPUT_BYTES="220",
+        TTS_SAFETY_MARGIN_BYTES="0",
+        TTS_MAX_CHUNK_BYTES="200",
+        TTS_MIN_CHUNK_BYTES="128",
+    )
+
+    text = "Sentence. " * 80
+
+    fragments = chunker.text_to_ssml_fragments(text, expanding_fragment)
+
+    assert fragments
+    warning_messages = [
+        record.message for record in caplog.records if "Reducing TTS chunk size" in record.message
+    ]
+    assert warning_messages, "expected chunk size reduction warning"
     assert all(
         len(fragment.encode("utf-8")) <= chunker.GOOGLE_TTS_MAX_INPUT_BYTES
         for fragment in fragments

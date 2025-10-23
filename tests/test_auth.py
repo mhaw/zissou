@@ -8,7 +8,7 @@ from app.models.item import Item
 
 def test_login_page_loads(client):
     """Tests that the login page loads correctly."""
-    client.application.config.update(AUTH_BACKEND="firebase")
+    client.application.config.update(AUTH_ENABLED=True, AUTH_BACKEND="firebase")
     response = client.get("/auth/login")
     assert response.status_code == 200
     assert b"Sign in to Zissou" in response.data
@@ -16,15 +16,15 @@ def test_login_page_loads(client):
 
 @patch("app.services.items.get_item")
 @patch("app.services.items.toggle_read_status")
-@patch("app.auth.ensure_user")
+@patch("app.auth.get_current_user")
 def test_toggle_read_status(
-    mock_ensure_user, mock_toggle_read_status, mock_get_item, client
+    mock_get_current_user, mock_toggle_read_status, mock_get_item, client
 ):
-    def ensure_user_side_effect():
+    def get_current_user_side_effect():
         g.user = {"uid": "test_user_id"}
         return g.user
 
-    mock_ensure_user.side_effect = ensure_user_side_effect
+    mock_get_current_user.side_effect = get_current_user_side_effect
 
     # Mock the item returned by get_item
     mock_item = Item(

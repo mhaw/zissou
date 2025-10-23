@@ -7,11 +7,11 @@
     <title>{% block title %}Zissou{% endblock %}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/zissou_favicon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous" defer></script>
-    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/response-targets.js" integrity="sha384-oT6V2v2+hZ2oFUNi2w0lF2IevyL3N2FX22M24oY6A2c/3T6iT1KDRL3R22tG/2yT" crossorigin="anonymous" defer></script>
+    <script src="{{ url_for('static', filename='js/vendor/htmx.min.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/vendor/response-targets.js') }}" defer></script>
     {% block head %}{% endblock %}
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans">
+<body class="bg-gray-100 text-gray-800 font-sans transition-colors duration-300 dark:bg-slate-900 dark:text-slate-100">
     <div class="container mx-auto p-4">
         {% include 'partials/_header.html' %}
         <main class="mt-8">
@@ -31,10 +31,9 @@
         </main>
         {% include 'partials/_footer.html' %}
     </div>
+    <script src="{{ url_for('static', filename='js/utils.js') }}" nonce="{{ csp_nonce() }}"></script>
+    <script src="{{ url_for('static', filename='js/theme-toggle.js') }}" nonce="{{ csp_nonce() }}"></script>
     <script src="{{ url_for('static', filename='js/auth.js') }}" nonce="{{ csp_nonce() }}"></script>
-    <script src="{{ url_for('static', filename='js/bucket-assignment.js') }}" nonce="{{ csp_nonce() }}"></script>
-    <script src="{{ url_for('static', filename='js/tag-components.js') }}" nonce="{{ csp_nonce() }}"></script>
-    <script src="{{ url_for('static', filename='js/load-more.js') }}" nonce="{{ csp_nonce() }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

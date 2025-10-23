@@ -62,4 +62,5 @@
 {% block scripts %}
 {{ super() }}
 <script src="{{ url_for('static', filename='js/bucket-dnd-prototype.js') }}"></script>
+<script src="{{ url_for('static', filename='js/load-more.js') }}" nonce="{{ csp_nonce() }}"></script>
 {% endblock %}

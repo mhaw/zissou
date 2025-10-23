@@ -2,7 +2,6 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from flask import current_app
 from google.cloud import firestore  # type: ignore[attr-defined]
 from google.cloud.exceptions import GoogleCloudError
 

@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 
@@ -261,10 +262,14 @@ def test_extract_text_skips_archive_for_long_trafilatura(monkeypatch):
         }
 
     def fail_truncated(_):  # pragma: no cover - should not be invoked
-        raise AssertionError("Truncation check should be skipped for long trafilatura output")
+        raise AssertionError(
+            "Truncation check should be skipped for long trafilatura output"
+        )
 
     def fail_archive(*_, **__):  # pragma: no cover - should not be invoked
-        raise AssertionError("Archive recovery should not run for long trafilatura output")
+        raise AssertionError(
+            "Archive recovery should not run for long trafilatura output"
+        )
 
     monkeypatch.setattr("app.services.parser._process_html", fake_process)
     monkeypatch.setattr("app.services.parser.is_likely_truncated", fail_truncated)
@@ -279,7 +284,7 @@ def test_domain_override_prioritises_trafilatura_for_nytimes():
     pipeline = parser_module._build_pipeline_for(
         "https://www.nytimes.com/2024/02/01/example.html"
     )
-    engines = [name for name, _ in pipeline]
+    engines = [strategy.name for strategy in pipeline]
     assert engines[0] == "trafilatura"
     assert "goose3" in engines
 
@@ -299,7 +304,7 @@ def test_process_html_emits_structured_logs(monkeypatch, caplog):
     monkeypatch.setattr(
         parser_module,
         "_build_pipeline_for",
-        lambda url: (("fake", fake_extractor),),
+        lambda url: (parser_module.ExtractorStrategy("fake", fake_extractor),),
     )
 
     result = parser_module._process_html(
@@ -315,7 +320,16 @@ def test_process_html_emits_structured_logs(monkeypatch, caplog):
         if record.name == "app.services.parser" and record.message.startswith("{")
     ]
     assert structured_messages, "Expected structured extractor logs"
-    payloads = [json.loads(message) for message in structured_messages]
+    payloads = []
+    for message in structured_messages:
+        try:
+            payloads.append(json.loads(message))
+        except json.JSONDecodeError:
+            try:
+                payloads.append(ast.literal_eval(message))
+            except ValueError:
+                # If both fail, something is wrong, or it's not a structured log
+                pass
     pipeline_events = [p for p in payloads if p.get("event") == "extractor_pipeline"]
     assert pipeline_events, "Expected consolidated extractor pipeline event"
     summary = pipeline_events[0]

@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+
+{% block title %}Feed Building{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900 shadow-sm transition-colors duration-300 dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-100">
+    <h1 class="text-2xl font-semibold mb-3">This feed is still getting ready</h1>
+    <p class="mb-4 leading-relaxed">
+        We are building the Firestore index required to serve {{ feed_label }}.
+        Please try again in a few minutes.
+    </p>
+    {% if bucket_slug %}
+        <p class="mb-2 text-sm">
+            Feed URL: <code class="rounded bg-amber-100 px-2 py-1 text-amber-800 dark:bg-amber-900/40 dark:text-amber-100">/feeds/{{ bucket_slug }}.xml</code>
+        </p>
+    {% endif %}
+    <p class="text-sm text-amber-800 dark:text-amber-200">
+        Request URL: {{ feed_url }}
+    </p>
+    {% if hint %}
+        <div class="mt-4 rounded-md border border-amber-300 bg-white/80 p-4 text-sm text-amber-900 dark:border-amber-500 dark:bg-slate-900/40 dark:text-amber-100">
+            <p class="font-semibold">Admin hint</p>
+            <p class="mt-1">
+                Create the missing Firestore index from
+                <a href="{{ hint }}" class="font-semibold underline hover:no-underline">this console link</a>,
+                then reload once the index status shows <em>Ready</em>.
+            </p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

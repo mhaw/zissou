@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'partials/_tag_summary.html' import tag_summary %}
 
 
 {% block meta %}
@@ -51,9 +52,12 @@
 {% block title %}{{ item.title }}{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md">
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md transition-colors duration-300 dark:bg-slate-800 dark:border dark:border-slate-700 dark:shadow-slate-900">
     <div class="mb-4 flex justify-between items-center">
-        <a href="{{ url_for('main.index') }}" class="text-blue-500 hover:underline">&larr; Back to List</a>
+        {% if back_url %}
+        <a href="{{ back_url }}" class="text-blue-500 hover:underline">&larr; {{ back_label }}</a>
+        {% endif %}
+        {% if can_edit %}
         <form action="{{ url_for('main.archive_item', item_id=item.id) }}" method="post">
             <button type="submit" class="inline-flex items-center gap-2 rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300">
                 <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -63,6 +67,7 @@
                 {{ 'Unarchive' if item.is_archived else 'Archive' }}
             </button>
         </form>
+        {% endif %}
     </div>
     <h1 class="text-3xl font-bold mb-2">{{ item.title }}</h1>
     <p class="text-gray-600 mb-4">By {{ item.author | default('Unknown Author') }}</p>
@@ -87,7 +92,7 @@
 
     <div class="mb-4" id="item-tag-summary-wrapper">
         <div class="flex flex-wrap gap-2" id="item-tag-summary" data-tag-summary>
-            {% include 'partials/_tag_summary.html' %}
+            {{ tag_summary(manual_tags, auto_tags) }}
         </div>
     </div>
 
@@ -183,6 +188,19 @@
         {% endif %}
     </div>
 
+    {% if item.summary_text %}
+    <div class="mt-6 pt-4 border-t">
+        <h3 class="font-bold mb-2">AI Summary</h3>
+        <p class="text-gray-700 whitespace-pre-line">{{ item.summary_text }}</p>
+    </div>
+    {% elif enable_summary %}
+    <div class="mt-6 pt-4 border-t">
+        <h3 class="font-bold mb-2">AI Summary</h3>
+        <p class="text-sm text-gray-500">Summary is being generated. Refresh this page in a moment.</p>
+    </div>
+    {% endif %}
+
+    {% if can_edit %}
     <div class="mt-6 pt-4 border-t">
         <h3 class="font-bold">Processing Metrics</h3>
         <p><strong>Processing Time:</strong> {{ item.processingTimeMs }} ms</p>
@@ -273,6 +291,7 @@
             <p class="text-sm text-slate-500 hidden" data-tag-status role="status"></p>
         </form>
     </div>
+    {% endif %}
 
     {% if item.text %}
     <div class="prose max-w-none mt-6 pt-4 border-t">
@@ -286,6 +305,10 @@
 {% block scripts %}
 {{ super() }}
 <script src="{{ url_for('static', filename='js/item-detail.js') }}"></script>
+{% if can_edit %}
+<script src="{{ url_for('static', filename='js/bucket-assignment.js') }}" nonce="{{ csp_nonce() }}"></script>
+<script src="{{ url_for('static', filename='js/tag-components.js') }}" nonce="{{ csp_nonce() }}"></script>
+{% endif %}
 <script nonce="{{ csp_nonce() }}">
     (function() {
         const copyButton = document.querySelector('[data-copy-source]');

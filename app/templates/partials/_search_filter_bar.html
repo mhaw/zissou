@@ -224,35 +224,17 @@
         });
 
         clearFiltersButton?.addEventListener('click', function() {
-            const form = clearFiltersButton.closest('form');
-            if (!form) {
-                return;
-            }
+            const url = new URL(window.location.href);
+            // Clear all filter-related parameters
+            ['q', 'bucket', 'duration', 'after', 'tags', 'tag', 'include_archived', 'include_read'].forEach(param => url.searchParams.delete(param));
+
+            // Reset tag selector if it exists
             if (window.TagSelectorRegistry) {
                 window.TagSelectorRegistry.clearByMode('filter');
             }
-            form.querySelectorAll('select').forEach(function(select) {
-                select.value = '';
-            });
-            form.querySelectorAll('button[name="duration"]').forEach(function(button) {
-                if (button.value === '') {
-                    button.classList.add('border-blue-500', 'bg-blue-500', 'text-white', 'shadow');
-                    button.classList.remove('border-slate-200', 'bg-slate-100', 'text-slate-700', 'hover:bg-slate-200');
-                } else {
-                    button.classList.remove('border-blue-500', 'bg-blue-500', 'text-white', 'shadow');
-                    button.classList.add('border-slate-200', 'bg-slate-100', 'text-slate-700', 'hover:bg-slate-200');
-                }
-            });
-            const formSearch = form.querySelector('input[name="q"]');
-            if (formSearch) {
-                formSearch.value = '';
-            }
-            if (searchInput) {
-                searchInput.value = '';
-            }
-            filterOverlay?.classList.add('hidden');
-            filterToggle?.setAttribute('aria-expanded', 'false');
-            form.submit();
+
+            // Navigate to the base URL to clear all filters
+            window.location.assign(url.origin + url.pathname);
         });
     })();
 </script>

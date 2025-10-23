@@ -2,7 +2,7 @@ import hashlib
 import html
 import io
 import json
-import logging
+import structlog
 import os
 import re
 import tempfile
@@ -17,7 +17,7 @@ import requests
 from dateutil import parser as date_parser
 from flask import Blueprint, jsonify, g, request
 from pydub import AudioSegment  # type: ignore[import-untyped]
-from typing import Any, Optional
+from typing import Any
 
 from app.extensions import csrf
 from app.models.item import Item
@@ -30,7 +30,8 @@ from app.services import (
     tasks as tasks_service,
     smart_buckets as smart_buckets_service,
 )
-from app.services.items import FirestoreError
+from app.services import ai_enrichment
+from app.services.firestore_client import FirestoreError
 from app.services.storage import StorageError
 from app.services.tts import TTSError, get_audio_format_info
 from app.services.ssml_chunker import (
@@ -38,11 +39,15 @@ from app.services.ssml_chunker import (
     SSMLChunkingError,
     text_to_ssml_fragments,
 )
-
-from google.oauth2 import id_token
+from app.utils.correlation import (
+    bind_request_context,
+    bind_task_context,
+    ensure_correlation_id,
+    update_context,
+)
 
 bp = Blueprint("tasks", __name__, url_prefix="/tasks")
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 NORMALIZE_AUDIO = os.getenv("TTS_NORMALIZE_AUDIO", "true").lower() not in {
     "false",
@@ -85,6 +90,10 @@ class ParsingError(Exception):
     """Raised when article parsing fails."""
 
 
+def _bucket_is_public(bucket) -> bool:
+    return bool(getattr(bucket, "is_public", False) or getattr(bucket, "public", False))
+
+
 def _verify_headers(req):
     """Validate Cloud Tasks headers to guard against spoofed requests."""
     required_headers = (
@@ -94,7 +103,7 @@ def _verify_headers(req):
     )
     missing = [header for header in required_headers if header not in req.headers]
     if missing:
-        logger.error("Task request missing Cloud Tasks headers: %s", ", ".join(missing))
+        logger.error("tasks.headers.missing", missing=missing)
         return None, f"Missing Cloud Tasks headers: {', '.join(missing)}"
 
     queue_header = req.headers.get("X-CloudTasks-QueueName", "")
@@ -106,9 +115,9 @@ def _verify_headers(req):
             normalized.endswith(expected_suffix) or normalized == expected_queue.lower()
         ):
             logger.error(
-                "Task request queue mismatch. Expected suffix %s, received %s",
-                expected_suffix,
-                queue_header,
+                "tasks.queue_mismatch",
+                expected_suffix=expected_suffix,
+                received=queue_header,
             )
             return None, "Unexpected Cloud Tasks queue"
 
@@ -119,7 +128,7 @@ def _verify_token(req):
     """Verify that the request is from Cloud Tasks."""
     auth_header = req.headers.get("Authorization")
     if not auth_header or "Bearer " not in auth_header:
-        logger.warning("Task handler called without Authorization header.")
+        logger.warning("tasks.auth.missing_header")
         return None, "Authorization header missing"
 
     token = auth_header.split("Bearer ")[1]
@@ -132,7 +141,7 @@ def _verify_token(req):
         kid = header["kid"]
         public_key = public_keys.get(kid)
         if not public_key:
-            logger.error("Public key for kid %s not found.", kid)
+            logger.error("tasks.auth.public_key_missing", kid=kid)
             return None, "Invalid token: public key not found"
 
         # 3. Verify the token's signature and decode it
@@ -148,7 +157,7 @@ def _verify_token(req):
         # 4. Manually verify audience
         service_url = os.getenv("SERVICE_URL")
         if not service_url:
-            logger.error("SERVICE_URL environment variable not set.")
+            logger.error("tasks.auth.service_url_missing")
             return None, "Configuration error: SERVICE_URL not set"
 
         expected_audience = service_url.rstrip("/") + "/tasks/process"
@@ -156,42 +165,46 @@ def _verify_token(req):
 
         if token_audience != expected_audience:
             logger.error(
-                "Invalid token audience. Expected %s, got %s",
-                expected_audience,
-                token_audience,
+                "tasks.auth.audience_mismatch",
+                expected=expected_audience,
+                received=token_audience,
             )
             return None, "Invalid token audience"
 
         # 5. Manually verify issuer
         if decoded_token.get("iss") != "https://accounts.google.com":
-            logger.error("Invalid token issuer: %s", decoded_token.get("iss"))
+            logger.error("tasks.auth.invalid_issuer", issuer=decoded_token.get("iss"))
             return None, "Invalid token issuer"
 
         # 6. Manually verify expiration
         if datetime.fromtimestamp(
             decoded_token.get("exp"), tz=timezone.utc
         ) < datetime.now(timezone.utc):
-            logger.error("Token has expired.")
+            logger.error("tasks.auth.token_expired")
             return None, "Token expired"
 
         invoker_email = os.getenv("SERVICE_ACCOUNT_EMAIL")
         if not invoker_email:
-            logger.error("SERVICE_ACCOUNT_EMAIL environment variable not set.")
+            logger.error("tasks.auth.service_account_missing")
             return None, "Configuration error: SERVICE_ACCOUNT_EMAIL not set"
 
         if decoded_token.get("email") != invoker_email:
-            logger.error("Invalid invoker email: %s", decoded_token.get("email"))
+            logger.error(
+                "tasks.auth.invalid_invoker",
+                invoker=decoded_token.get("email"),
+                expected=invoker_email,
+            )
             return None, "Invalid invoker"
 
         return decoded_token, None
     except jwt.exceptions.PyJWTError as exc:
-        logger.exception("Token verification failed: %s", exc)
+        logger.exception("tasks.auth.token_verification_failed", error=str(exc))
         return None, f"Token verification failed: {exc}"
     except requests.exceptions.RequestException as exc:
-        logger.exception("Failed to fetch public keys: %s", exc)
+        logger.exception("tasks.auth.public_key_fetch_failed", error=str(exc))
         return None, f"Failed to fetch public keys: {exc}"
     except Exception as exc:
-        logger.exception("Unexpected error during token verification: %s", exc)
+        logger.exception("tasks.auth.unexpected_error", error=str(exc))
         return None, f"Unexpected error during token verification: {exc}"
 
 
@@ -292,6 +305,8 @@ def _build_ssml_fragment(text: str, *, break_after: bool = False) -> str:
 def process_task_handler():
     """The webhook handler for Google Cloud Tasks."""
 
+    ensure_correlation_id(request.headers.get("X-Correlation-ID"))
+
     _, header_error = _verify_headers(request)
     if header_error:
         return (
@@ -315,9 +330,18 @@ def process_task_handler():
         url = payload.get("url")
         voice = payload.get("voice")
         bucket_id = payload.get("bucket_id")
+        bucket_slug = payload.get("bucket_slug")
+        if bucket_id:
+            bucket_id, _ = tasks_service.normalize_bucket_reference(bucket_id)
+        elif bucket_slug:
+            bucket_id, _ = tasks_service.normalize_bucket_reference(bucket_slug)
         user_id = payload.get("user_id")
 
         if not task_id or not url:
+            logger.error(
+                "tasks.process.missing_payload_fields",
+                payload_keys=list(payload.keys()),
+            )
             return (
                 jsonify(
                     {"status": "error", "message": "Missing task_id or url in payload"}
@@ -327,14 +351,19 @@ def process_task_handler():
 
         claim_status, task = tasks_service.claim_task_for_processing(task_id)
         if claim_status == "missing":
-            logger.error("Task %s received but not found in Firestore.", task_id)
+            bind_task_context(task_id=task_id)
+            bind_request_context(url=url)
+            request_logger = logger.bind(task_id=task_id, url=url)
+            request_logger.error("tasks.process.missing_task")
             return jsonify({"status": "error", "message": "Task not found in DB"}), 200
         if claim_status == "duplicate":
             existing_status = task.status if task else "unknown"
-            logger.warning(
-                "Task %s received with status '%s'. Duplicate delivery acknowledged.",
-                task_id,
-                existing_status,
+            bind_task_context(task_id=task_id)
+            bind_request_context(url=url)
+            request_logger = logger.bind(task_id=task_id, url=url)
+            request_logger.warning(
+                "tasks.process.duplicate_delivery",
+                existing_status=existing_status,
             )
             return (
                 jsonify(
@@ -348,15 +377,23 @@ def process_task_handler():
             bucket_id = bucket_id or task.bucket_id
             user_id = user_id or task.userId  # Use task.userId if not in payload
 
+        bind_task_context(task_id=task_id)
+        bind_request_context(url=url)
+        request_logger = logger.bind(task_id=task_id, url=url)
+        request_logger.info(
+            "tasks.process.accepted",
+            queue=request.headers.get("X-CloudTasks-QueueName"),
+        )
+
         process_article_task(task_id, url, voice, bucket_id, user_id)
 
         return jsonify({"status": "ok"}), 200
 
     except json.JSONDecodeError:
-        logger.error("Task handler received invalid JSON.")
+        logger.error("tasks.process.invalid_json")
         return jsonify({"status": "error", "message": "Invalid JSON payload"}), 400
     except Exception as exc:
-        logger.exception("Unexpected error in task handler: %s", exc)
+        logger.exception("tasks.process.unexpected_error", error=str(exc))
         return (
             jsonify({"status": "error", "message": "An unexpected error occurred"}),
             500,
@@ -365,40 +402,57 @@ def process_task_handler():
 
 def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None):
     """The background task for processing an article."""
-    logger.info("Task %s: Starting processing for URL: %s", task_id, url)
-    start_time = datetime.now(timezone.utc)
+    correlation_id = ensure_correlation_id()
+    bind_task_context(task_id=task_id)
+    bind_request_context(url=url)
+    update_context(status="PROCESSING")
 
+    task_logger = logger.bind(task_id=task_id, url=url)
+    task_logger.info(
+        "tasks.process.start",
+        voice=voice,
+        bucket_id=bucket_id,
+        user_id=user_id,
+    )
+
+    start_time = datetime.now(timezone.utc)
     parsing_ms = 0
     tts_ms = 0
     upload_ms = 0
     chunk_count = 0
 
+    def transition(status: str, **fields):
+        tasks_service.update_task(task_id, status=status, **fields)
+        update_context(status=status)
+        task_logger.debug("tasks.status.transition", status=status, **fields)
+
     try:
+        bucket_public = False
         if bucket_id:
-            tasks_service.update_task(task_id, status="VALIDATING_INPUT")
+            transition("VALIDATING_INPUT")
             bucket = buckets_service.get_bucket(bucket_id)
             if not bucket:
-                logger.warning(
-                    "Task %s: Bucket %s missing. Continuing without bucket assignment.",
-                    task_id,
-                    bucket_id,
+                task_logger.warning(
+                    "tasks.bucket_missing",
+                    bucket_id=bucket_id,
                 )
                 bucket_id = None
             else:
                 bucket_id = getattr(bucket, "id", bucket_id)
+                bucket_public = _bucket_is_public(bucket)
+                task_logger.info("tasks.bucket_attached", bucket_id=bucket_id)
 
-        tasks_service.update_task(task_id, status="CHECKING_EXISTING")
+        transition("CHECKING_EXISTING")
         existing_item = items_service.find_item_by_source_url(url)
         if existing_item:
-            tasks_service.update_task(
-                task_id, status="COMPLETED", item_id=existing_item.id
-            )
-            logger.info(
-                "Task %s: URL already processed as item %s", task_id, existing_item.id
+            transition("COMPLETED", item_id=existing_item.id)
+            task_logger.info(
+                "tasks.url_already_processed",
+                item_id=existing_item.id,
             )
             return
 
-        tasks_service.update_task(task_id, status="PARSING")
+        transition("PARSING")
         parse_start = time.perf_counter()
         parsed_data = parser.extract_text(url)
         parsing_ms = int((time.perf_counter() - parse_start) * 1000)
@@ -414,16 +468,20 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         raw_text_content = parsed_data["text"] or ""
         text_content = raw_text_content.replace("\\r\\n", "\\n").replace("\\r", "\\n")
         parser_name = parsed_data.get("parser", "unknown")
+        task_logger.info(
+            "tasks.parse.succeeded",
+            parser=parser_name,
+            parsing_ms=parsing_ms,
+        )
 
         published_at = None
         if parsed_data.get("published_date"):
             try:
                 published_at = date_parser.parse(parsed_data["published_date"])
             except (ValueError, TypeError):
-                logger.warning(
-                    "Task %s: Could not parse published_date: %s",
-                    task_id,
-                    parsed_data["published_date"],
+                task_logger.warning(
+                    "tasks.published_date_parse_failed",
+                    published_date=parsed_data["published_date"],
                 )
 
         narration_intro = _build_narration_intro(parsed_data, url, published_at)
@@ -455,7 +513,7 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
                 "Generated narration script contained no synthesizable text."
             )
 
-        tasks_service.update_task(task_id, status="CONVERTING_AUDIO")
+        transition("CONVERTING_AUDIO")
         tts_start = time.perf_counter()
 
         format_info = get_audio_format_info()
@@ -465,15 +523,19 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         try:
             total_chunks = len(ssml_fragments)
             for index, fragment in enumerate(ssml_fragments, start=1):
-                log_context = {
-                    "task_id": task_id,
-                    "chunk_index": index,
-                    "chunk_total": total_chunks,
-                }
                 if index in {1, total_chunks}:
-                    logger.info("tts.chunk", extra=log_context)
+                    task_logger.info(
+                        "tts.chunk",
+                        chunk_index=index,
+                        chunk_total=total_chunks,
+                    )
                 elif index % 5 == 0:
-                    logger.debug("tts.chunk", extra=log_context)
+                    task_logger.debug(
+                        "tts.chunk",
+                        chunk_index=index,
+                        chunk_total=total_chunks,
+                    )
+
                 audio_chunk_content, _, voice_setting = tts.text_to_speech(
                     fragment, voice_name=voice, use_ssml=True
                 )
@@ -483,6 +545,7 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
                 ) as temp_f:
                     temp_f.write(audio_chunk_content)
                     temp_files.append(temp_f.name)
+
             combined_audio = AudioSegment.empty()
             for temp_f_name in temp_files:
                 audio_segment = AudioSegment.from_file(
@@ -503,32 +566,40 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
             for temp_f_name in temp_files:
                 try:
                     os.remove(temp_f_name)
-                except OSError as e:
-                    logger.error(f"Error deleting temp file {temp_f_name}: {e}")
+                except OSError as exc:
+                    task_logger.error(
+                        "tasks.tempfile_cleanup_failed",
+                        path=temp_f_name,
+                        error=str(exc),
+                    )
 
         tts_ms = int((time.perf_counter() - tts_start) * 1000)
+        task_logger.info(
+            "tts.completed",
+            chunk_count=chunk_count,
+            tts_ms=tts_ms,
+            voice_setting=voice_setting,
+        )
 
-        tasks_service.update_task(task_id, status="UPLOADING_AUDIO")
+        transition("UPLOADING_AUDIO")
         upload_start = time.perf_counter()
         audio_hash = hashlib.sha1(audio_content).hexdigest()
         blob_name = f"audio/{audio_hash}.{format_info['extension']}"
+        task_logger.info("storage.upload.start", blob_name=blob_name)
         audio_url = storage.upload_to_gcs(
             audio_content, blob_name, content_type=format_info["content_type"]
         )
         upload_ms = int((time.perf_counter() - upload_start) * 1000)
 
-        tasks_service.update_task(task_id, status="SAVING_ITEM")
-        logger.info(
+        transition("SAVING_ITEM")
+        task_logger.info(
             "task.pipeline",
-            extra={
-                "task_id": task_id,
-                "parser": parser_name,
-                "chunk_count": chunk_count,
-                "text_bytes": total_text_bytes,
-                "parsing_ms": parsing_ms,
-                "tts_ms": tts_ms,
-                "upload_ms": upload_ms,
-            },
+            parser=parser_name,
+            chunk_count=chunk_count,
+            text_bytes=total_text_bytes,
+            parsing_ms=parsing_ms,
+            tts_ms=tts_ms,
+            upload_ms=upload_ms,
         )
 
         processing_time_ms = int(
@@ -557,12 +628,15 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
             uploadTimeMs=upload_ms,
             chunkCount=chunk_count,
             textLength=text_length,
+            is_public=bucket_public,
         )
         if bucket_id:
             new_item.buckets.append(bucket_id)
         item_id = items_service.create_item(new_item, user_id)
 
-        # Apply smart buckets
+        article_text = f"{narration_intro}\n\n{text_content}".strip()
+        ai_enrichment.maybe_schedule_enrichment(item_id, article_text, correlation_id)
+
         smart_buckets = smart_buckets_service.list_smart_buckets()
         for smart_bucket in smart_buckets:
             if smart_buckets_service.evaluate_item(new_item, smart_bucket.rules):
@@ -572,56 +646,84 @@ def process_article_task(task_id, url, voice=None, bucket_id=None, user_id=None)
         if new_item.buckets:
             items_service.update_item_buckets(item_id, new_item.buckets)
 
-        tasks_service.update_task(task_id, status="COMPLETED", item_id=item_id)
-        logger.info("Task %s: Completed successfully. Item ID: %s", task_id, item_id)
+        transition("COMPLETED", item_id=item_id)
+        task_logger.info(
+            "tasks.process.completed",
+            item_id=item_id,
+            processing_ms=processing_time_ms,
+            parsing_ms=parsing_ms,
+            tts_ms=tts_ms,
+            upload_ms=upload_ms,
+            chunk_count=chunk_count,
+        )
 
     except ParsingError as exc:
         error_message = f"Processing failed: {exc}"
-        logger.exception("Task %s: %s", task_id, error_message)
-        tasks_service.update_task(
-            task_id,
-            status="FAILED",
+        task_logger.exception(
+            "tasks.process.failed",
+            error_code=TaskErrorCodes.PARSER,
+            error_message=error_message,
+        )
+        transition(
+            "FAILED",
             error=error_message,
             error_code=TaskErrorCodes.PARSER,
         )
         raise
     except TTSError as exc:
         error_message = f"Processing failed: {exc}"
-        logger.exception("Task %s: %s", task_id, error_message)
-        tasks_service.update_task(
-            task_id, status="FAILED", error=error_message, error_code=TaskErrorCodes.TTS
+        task_logger.exception(
+            "tasks.process.failed",
+            error_code=TaskErrorCodes.TTS,
+            error_message=error_message,
+        )
+        transition(
+            "FAILED",
+            error=error_message,
+            error_code=TaskErrorCodes.TTS,
         )
         raise
     except StorageError as exc:
         error_message = f"Processing failed: {exc}"
-        logger.exception("Task %s: %s", task_id, error_message)
-        tasks_service.update_task(
-            task_id,
-            status="FAILED",
+        task_logger.exception(
+            "tasks.process.failed",
+            error_code=TaskErrorCodes.STORAGE,
+            error_message=error_message,
+        )
+        transition(
+            "FAILED",
             error=error_message,
             error_code=TaskErrorCodes.STORAGE,
         )
         raise
     except FirestoreError as exc:
         error_message = f"Processing failed: {exc}"
-        logger.exception("Task %s: %s", task_id, error_message)
-        tasks_service.update_task(
-            task_id,
-            status="FAILED",
+        task_logger.exception(
+            "tasks.process.failed",
+            error_code=TaskErrorCodes.DATASTORE,
+            error_message=error_message,
+        )
+        transition(
+            "FAILED",
             error=error_message,
             error_code=TaskErrorCodes.DATASTORE,
         )
         raise
     except Exception as exc:
         error_message = f"An unexpected error occurred: {exc}"
-        logger.exception("Task %s: %s", task_id, error_message)
-        tasks_service.update_task(
-            task_id,
-            status="FAILED",
+        task_logger.exception(
+            "tasks.process.failed",
+            error_code=TaskErrorCodes.UNKNOWN,
+            error_message=error_message,
+        )
+        transition(
+            "FAILED",
             error=error_message,
             error_code=TaskErrorCodes.UNKNOWN,
         )
         raise
+
+
 def _get_google_public_keys() -> dict[str, Any]:
     global _cert_cache, _cert_cache_at
 
@@ -630,9 +732,7 @@ def _get_google_public_keys() -> dict[str, Any]:
         if _cert_cache and _cert_cache_at and now - _cert_cache_at < _CERT_CACHE_TTL:
             return _cert_cache
 
-        response = requests.get(
-            "https://www.googleapis.com/oauth2/v3/certs", timeout=5
-        )
+        response = requests.get("https://www.googleapis.com/oauth2/v3/certs", timeout=5)
         response.raise_for_status()
         keys = {
             jwk["kid"]: jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))

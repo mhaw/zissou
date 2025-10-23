@@ -1,0 +1,13 @@
+# Development-specific dependencies
+black
+ruff
+mypy
+types-cachetools
+types-requests
+lxml-stubs
+types-python-dateutil
+playwright
+pytest
+pip-audit
+rich<13
+pydantic-settings>=2.2,<3

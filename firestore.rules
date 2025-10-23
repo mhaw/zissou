@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasUserId(doc) {
+      return doc != null && doc.data.userId != null;
+    }
+
+    function isOwner(doc) {
+      return isSignedIn() && hasUserId(doc) && doc.data.userId == request.auth.uid;
+    }
+
+    function isOwnerForRequest(doc) {
+      return isSignedIn() && hasUserId(doc) && doc.data.userId == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow create, read, update, delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /items/{itemId} {
+      allow read: if isOwner(resource);
+      allow create: if isOwnerForRequest(request.resource);
+      allow update, delete: if isOwner(resource);
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isOwner(resource);
+      allow create: if isOwnerForRequest(request.resource);
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

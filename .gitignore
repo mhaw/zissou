@@ -1,5 +1,6 @@
 # Python
 .venv/
+dev-requirements.txt
 __pycache__/
 *.pyc
 *.pyo

@@ -6,7 +6,9 @@ from typing import Callable, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
-GOOGLE_TTS_MAX_INPUT_BYTES = int(os.getenv("TTS_REQUEST_BYTE_LIMIT", "5000"))
+GOOGLE_TTS_MAX_INPUT_BYTES = int(
+    os.getenv("GOOGLE_TTS_MAX_INPUT_BYTES") or os.getenv("TTS_REQUEST_BYTE_LIMIT", "5000")
+)
 TTS_SAFETY_MARGIN_BYTES = int(os.getenv("TTS_SAFETY_MARGIN_BYTES", "400"))
 TTS_MIN_CHUNK_BYTES = int(os.getenv("TTS_MIN_CHUNK_BYTES", "600"))
 _raw_tts_chunk_bytes = int(os.getenv("TTS_MAX_CHUNK_BYTES", "4800"))
@@ -74,43 +76,61 @@ def chunk_text(text: str, max_bytes: int) -> List[str]:
         return []
 
     chunks: List[str] = []
-    current = ""
+    current_block_accumulator = ""
 
     for block in _iter_blocks(text):
         block_bytes = len(block.encode("utf-8"))
+        
+        # If the block itself is small enough, try to add it to the current block accumulator
         if block_bytes <= max_bytes:
-            candidate = f"{current}\n\n{block}".strip() if current else block
-            if len(candidate.encode("utf-8")) <= max_bytes:
-                current = candidate
+            candidate_block_accumulator = (f"{current_block_accumulator}\n\n{block}").strip() if current_block_accumulator else block
+            if len(candidate_block_accumulator.encode("utf-8")) <= max_bytes:
+                current_block_accumulator = candidate_block_accumulator
+                continue # Continue to next block
+            else:
+                # Current block accumulator is full, append it and start new with current block
+                if current_block_accumulator:
+                    chunks.append(current_block_accumulator)
+                current_block_accumulator = block
                 continue
-            if current:
-                chunks.append(current)
-            current = block
-            continue
 
-        if current:
-            chunks.append(current)
-            current = ""
+        # If block is too large, or current_block_accumulator is full, process sentences
+        if current_block_accumulator: # Append any accumulated content before processing sentences
+            chunks.append(current_block_accumulator)
+            current_block_accumulator = ""
 
         sentences = re.split(r"(?<=[.!?])\s+", block)
+        current_sentence_accumulator = "" # Accumulates content for the current sentence chunk
+
         for sentence in sentences:
-            if not sentence:
+            if not sentence.strip():
+                continue
+            
+            stripped_sentence = sentence.strip()
+
+            # If sentence itself is too long, split it
+            if len(stripped_sentence.encode('utf-8')) > max_bytes:
+                if current_sentence_accumulator: # Append any accumulated sentences
+                    chunks.append(current_sentence_accumulator)
+                    current_sentence_accumulator = ""
+                chunks.extend(_split_long_sentence(stripped_sentence, max_bytes))
                 continue
 
-            candidate = sentence.strip()
-            if len(candidate.encode("utf-8")) <= max_bytes:
-                chunks.append(candidate)
-                continue
+            # Try to add to current sentence chunk
+            candidate_sentence_chunk = (current_sentence_accumulator + " " + stripped_sentence).strip()
+            if len(candidate_sentence_chunk.encode('utf-8')) <= max_bytes:
+                current_sentence_accumulator = candidate_sentence_chunk
+            else:
+                # Current sentence chunk is full, append it and start new with current sentence
+                if current_sentence_accumulator:
+                    chunks.append(current_sentence_accumulator)
+                current_sentence_accumulator = stripped_sentence
+        
+        if current_sentence_accumulator: # Append any remaining sentence chunk
+            chunks.append(current_sentence_accumulator)
 
-            for fragment in _split_long_sentence(candidate, max_bytes):
-                fragment_bytes = len(fragment.encode("utf-8"))
-                if fragment_bytes <= max_bytes:
-                    chunks.append(fragment)
-                else:
-                    chunks.extend(_split_by_bytes(fragment, max_bytes))
-
-    if current:
-        chunks.append(current)
+    if current_block_accumulator: # Append any remaining block chunk
+        chunks.append(current_block_accumulator)
 
     return [chunk.strip() for chunk in chunks if chunk.strip()]
 

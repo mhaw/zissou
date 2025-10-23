@@ -25,15 +25,18 @@ PYTHON_BIN = $(VENV_DIR)/bin/python
 PLAYWRIGHT = npx playwright
 
 # Development
-setup: $(VENV_DIR)/bin/activate
-$(VENV_DIR)/bin/activate: requirements.txt
+setup: requirements.txt dev-requirements.txt
 	$(PYTHON) -m venv $(VENV_DIR)
 	$(PIP) install -r requirements.txt
+	$(PIP) install -r dev-requirements.txt
 	@echo "Virtual environment created and dependencies installed."
 	@echo "Run 'source .venv/bin/activate' to activate."
 
 install:
 	$(PIP) install -r requirements.txt
+
+install-dev:
+	$(PIP) install -r dev-requirements.txt
 
 dev: validate $(VENV_DIR)/bin/activate
 	@echo "Starting Flask development server..."
@@ -52,7 +55,9 @@ typecheck: $(VENV_DIR)/bin/activate
 	$(MYPY) app/
 
 test: $(VENV_DIR)/bin/activate
+	$(PIP) check
 	$(PYTEST)
+	$(VENV_DIR)/bin/pip-audit -r requirements.txt
 
 test\:e2e-auth:
 	@echo "Running Playwright E2E authentication tests..."
@@ -86,6 +91,7 @@ auth\:emulators:
 # Docker & Deployment
 build:
 	@echo "Building Docker image: $(IMAGE_TAG)..."
+	python -m py_compile app/**/*.py
 	docker build --platform linux/amd64 -t $(IMAGE_TAG) .
 	docker tag $(IMAGE_TAG) $(LATEST_TAG)
 	@echo "Tagged image as: $(LATEST_TAG)"
@@ -99,13 +105,14 @@ run: validate
 grant-admin-role: $(VENV_DIR)/bin/activate
 	@$(PYTHON_BIN) tools/set_admin_claim.py --email $(email) --admin
 
-deploy:
-	@if [ ! -f .env.prod ]; then \
-		echo "ERROR: .env.prod file not found. Please create it before deploying."; \
-		exit 1; \
-	fi
-	@echo "Deploying to Cloud Run..."
-	SKIP_BUILD=$(SKIP_BUILD) ./infra/deploy_cloud_run.sh
+verify-indexes:
+	@echo "Verifying Firestore indexes..."
+	@$(PYTHON) tools/verify_indexes.py
+
+deploy: verify-indexes
+	@echo "Deploying application..."
+	@gcloud run deploy zissou --source . --region us-central1 --allow-unauthenticated
+
 
 cloud-setup:
 	@echo "Setting up GCP infrastructure..."

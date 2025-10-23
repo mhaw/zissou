@@ -66,7 +66,11 @@ def _get_storage_client() -> storage.Client:
     global _storage_client, _client_expiry
 
     now = time.monotonic()
-    if _storage_client is not None and _client_expiry is not None and now < _client_expiry:
+    if (
+        _storage_client is not None
+        and _client_expiry is not None
+        and now < _client_expiry
+    ):
         return _storage_client
 
     project_hint = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT_ID")
@@ -91,7 +95,10 @@ def _ensure_bucket(client: storage.Client, bucket_name: str) -> storage.Bucket:
 
     bucket = client.bucket(bucket_name)
     now = time.monotonic()
-    if _bucket_checked_at is not None and now - _bucket_checked_at < STORAGE_BUCKET_REFRESH_SECONDS:
+    if (
+        _bucket_checked_at is not None
+        and now - _bucket_checked_at < STORAGE_BUCKET_REFRESH_SECONDS
+    ):
         return bucket
 
     try:
@@ -101,9 +108,7 @@ def _ensure_bucket(client: storage.Client, bucket_name: str) -> storage.Bucket:
             f"Service account lacks permission to access bucket {bucket_name}: {exc}"
         ) from exc
     except GoogleCloudError as exc:
-        raise StorageError(
-            f"Failed to validate bucket {bucket_name}: {exc}"
-        ) from exc
+        raise StorageError(f"Failed to validate bucket {bucket_name}: {exc}") from exc
 
     if not exists:
         raise StorageError(

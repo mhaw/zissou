@@ -1,7 +1,7 @@
-
 from __future__ import annotations
 
 import pickle
+import typing as t
 from datetime import datetime, timedelta, timezone
 
 from flask_caching.backends.base import BaseCache
@@ -98,4 +98,3 @@ class FirestoreCache(BaseCache):
         for doc in docs:
             doc.reference.delete()
         return True
-

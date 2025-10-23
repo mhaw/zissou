@@ -6,7 +6,7 @@ if [ -f .env ]; then
 fi
 
 # Default required variables
-required_vars=("GCP_PROJECT_ID" "GCP_REGION" "GCS_BUCKET" "SECRET_KEY" "CLOUD_TASKS_QUEUE" "CLOUD_TASKS_LOCATION" "SERVICE_ACCOUNT_EMAIL")
+required_vars=("GCP_PROJECT_ID" "GCP_REGION" "GCS_BUCKET" "SECRET_KEY" "CLOUD_TASKS_QUEUE" "CLOUD_TASKS_LOCATION" "SERVICE_ACCOUNT_EMAIL" "SERVICE_URL")
 
 # Check for AUTH_BACKEND and add firebase variables if needed
 if [ "$AUTH_BACKEND" == "firebase" ]; then

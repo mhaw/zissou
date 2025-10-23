@@ -1,9 +1,11 @@
 import logging
+import os
 import random
 from urllib.parse import urlencode, urlparse
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     g,
     redirect,
@@ -12,7 +14,9 @@ from flask import (
     url_for,
     jsonify,
 )
+from jinja2 import TemplateError, TemplateNotFound
 from app.auth import auth_required
+from app import auth
 from app.extensions import cache
 from app.models.smart_bucket import SmartBucketRule
 from app.services import (
@@ -25,8 +29,11 @@ from app.services import (
 )
 
 from app.services.tts import VOICE_PROFILES
-from app.services.items import FirestoreError
+from app.services.firestore_client import FirestoreError
 from app.utils.rate_limits import submission_rate_limiter
+
+
+
 
 
 bp = Blueprint("main", __name__)
@@ -36,6 +43,7 @@ ALLOWED_URL_SCHEMES = {"http", "https"}
 MAX_URL_LENGTH = 2048
 MAX_TAG_LENGTH = 64
 MAX_TAGS_PER_ITEM = 25
+RECENT_BUCKETS_LIMIT = 4
 
 
 def _parse_list_params():
@@ -136,6 +144,7 @@ def _load_item_listing(params: dict, archived_status: str = "unarchived") -> dic
         search_query=params.get("q"),
         sort_by=params.get("sort") or "newest",
         tags=list(selected_tags),
+        duration=params.get("duration"),
         bucket_slug=params.get("bucket"),
         cursor=params.get("after"),
         limit=int(params.get("limit") or 25),
@@ -143,6 +152,11 @@ def _load_item_listing(params: dict, archived_status: str = "unarchived") -> dic
         include_read=bool(params.get("include_read")),
     )
     all_buckets = buckets_service.list_buckets()
+    current_user = auth.ensure_user()
+    if current_user is None:
+        current_user = getattr(g, "user", None)
+    else:
+        setattr(g, "user", current_user)
     bucket_lookup = {
         bucket.id: bucket for bucket in all_buckets if getattr(bucket, "id", None)
     }
@@ -210,7 +224,7 @@ def index():
     """Lists all items."""
     params = _parse_list_params()
     listing = _load_item_listing(params)
-    recent_buckets = buckets_service.list_recent_buckets(limit=4)
+    recent_buckets = buckets_service.list_recent_buckets(limit=RECENT_BUCKETS_LIMIT)
 
     if _request_wants_json():
         items_html = render_template(
@@ -244,14 +258,16 @@ def index():
 @bp.route("/new", methods=("GET", "POST"))
 @auth_required
 def new_item():
-    """Handles submission of a new article."""
     all_buckets = buckets_service.list_buckets()
-    prefill_url = request.args.get("url", "").strip()
+    current_user = auth.ensure_user()
+    if current_user is None:
+        current_user = getattr(g, "user", None)
+    else:
+        setattr(g, "user", current_user)
     if request.method == "POST":
         url = (request.form.get("url") or "").strip()
         voice = request.form.get("voice")
         bucket_id = request.form.get("bucket_id")  # Get selected bucket ID
-        prefill_url = url or prefill_url
 
         if not url:
             flash("URL is required.", "error")
@@ -273,11 +289,13 @@ def new_item():
                 f"Too many submissions right now. Please wait {wait_seconds} seconds and try again.",
                 "error",
             )
-            return redirect(url_for("main.new_item", url=url))
+            response = redirect(url_for("main.new_item", url=url))
+            response.headers["Retry-After"] = str(max(wait_seconds, 1))
+            return response
 
         try:
             task_id = tasks_service.submit_task(
-                url, voice=voice, bucket_id=bucket_id, user=g.user
+                url, voice=voice, bucket_id=bucket_id, user=current_user
             )
             return redirect(url_for("main.progress_page", task_id=task_id))
         except (FirestoreError, ValueError) as e:
@@ -307,6 +325,11 @@ def new_item():
 @auth_required
 def import_readwise():
     all_buckets = buckets_service.list_buckets()
+    current_user = auth.ensure_user()
+    if current_user is None:
+        current_user = getattr(g, "user", None)
+    else:
+        setattr(g, "user", current_user)
     shared_url = ""
     share_title = None
     articles: list[readwise_service.ReadwiseArticle] = []
@@ -350,7 +373,7 @@ def import_readwise():
                 f"Too many Readwise imports in a short period. Please retry in {wait_seconds} seconds.",
                 "error",
             )
-            return redirect(
+            response = redirect(
                 url_for(
                     "main.import_readwise",
                     shared_url=shared_url,
@@ -358,6 +381,8 @@ def import_readwise():
                     bucket_id=default_bucket,
                 )
             )
+            response.headers["Retry-After"] = str(max(wait_seconds, 1))
+            return response
 
         queued = 0
         failures: list[str] = []
@@ -376,7 +401,7 @@ def import_readwise():
                     article_url,
                     voice=default_voice or None,
                     bucket_id=default_bucket or None,
-                    user=g.user,
+                    user=current_user,
                 )
                 queued += 1
             except Exception:  # pragma: no cover - defensive guard
@@ -537,7 +562,13 @@ def update_item_tags_api(item_id):
         )
 
     _invalidate_page_cache()
-    tag_summary_html = render_template("partials/_tag_summary.html", tags=item.tags)
+    tag_summary_template = current_app.jinja_env.get_template(
+        "partials/_tag_summary.html"
+    )
+    tag_summary_html = tag_summary_template.module.tag_summary(
+        manual_tags=item.tags or [],
+        auto_tags=item.auto_tags or [],
+    )
 
     return jsonify(
         {
@@ -616,14 +647,28 @@ def update_item_buckets_api(item_id):
 
 
 @bp.route("/items/<item_id>", methods=("GET", "POST"))
-@auth_required
 def item_detail(item_id):
+    auth_enabled = current_app.config.get("AUTH_ENABLED", False)
+    current_user = getattr(g, "user", None)
+    if current_user is None and auth_enabled:
+        current_user = auth.ensure_user()
+        if current_user:
+            setattr(g, "user", current_user)
+    can_edit = bool(current_user)
+
+    back_url = url_for("main.index") if can_edit else url_for("feeds.public_feed_page")
+    back_label = "Back to List" if can_edit else "Browse Feed"
+
     item = items_service.get_item(item_id)
     if not item:
         flash("Item not found.")
-        return redirect(url_for("main.index"))
+        return redirect(back_url)
 
     if request.method == "POST":
+        if auth_enabled and not can_edit:
+            flash("Please sign in to update items.", "warning")
+            login_target = url_for("auth.login", next=request.url)
+            return redirect(login_target)
         if "tags" in request.form:
             raw_tags = request.form.getlist("tags")
             if not raw_tags:
@@ -658,14 +703,49 @@ def item_detail(item_id):
         display_name = bucket.name or bucket.slug or bucket.id
         bucket_options.append({"id": bucket.id, "name": display_name})
     all_tags = items_service.get_all_unique_tags()
-    return render_template(
-        "item_detail.html",
-        item=item,
-        buckets=all_buckets,
-        bucket_lookup=bucket_lookup,
-        bucket_options=bucket_options,
-        all_tags=all_tags,
-    )
+    try:
+        return render_template(
+            "item_detail.html",
+            item=item,
+            buckets=all_buckets,
+            bucket_lookup=bucket_lookup,
+            bucket_options=bucket_options,
+            all_tags=all_tags,
+            manual_tags=item.tags or [],
+            auto_tags=item.auto_tags or [],
+            enable_summary=os.getenv("ENABLE_SUMMARY", "false").lower()
+            in {"true", "1", "yes"},
+            enable_auto_tags=os.getenv("ENABLE_AUTO_TAGS", "false").lower()
+            in {"true", "1", "yes"},
+            can_edit=can_edit,
+            back_url=back_url,
+            back_label=back_label,
+        )
+    except TemplateNotFound as exc:
+        # structlog uses positional args as event; rely on exception() for stack traces.
+        logger.exception(
+            "Error rendering item_detail",
+            extra={"item_id": item_id, "template_name": getattr(exc, "name", str(exc))},
+        )
+        return (
+            render_template(
+                "500.html",
+                error_message="We could not locate the view for this article.",
+            ),
+            500,
+        )
+    except TemplateError as exc:
+        logger.exception(
+            "Error rendering item_detail",
+            extra={"item_id": item_id, "error": str(exc)},
+        )
+        return (
+            render_template(
+                "500.html",
+                error_message="We ran into a problem showing this article.",
+            ),
+            500,
+        )
 
 
 @bp.route("/items/<item_id>/read", methods=["POST"])
@@ -761,8 +841,8 @@ def bucket_items(bucket_id):
 @auth_required
 def list_buckets():
     if request.method == "POST":
-        name = request.form["name"]
-        slug = request.form["slug"]
+        name = request.form["name"].strip()
+        slug = (request.form["slug"] or "").strip().lower()
         description = request.form["description"]
         rss_author_name = request.form.get("rss_author_name")
         rss_owner_email = request.form.get("rss_owner_email")
@@ -798,11 +878,6 @@ def list_buckets():
 
     all_buckets = buckets_service.list_buckets()
     return render_template("buckets.html", buckets=all_buckets)
-
-
-@bp.route("/health")
-def health_check():
-    return "OK", 200
 
 
 @bp.route("/archived")
@@ -936,3 +1011,13 @@ def csp_report():
     except Exception as e:
         logger.error("Error processing CSP report: %s", e)
     return "", 204
+
+
+@bp.route("/health")
+def health_check():
+    from app.services import health as health_service
+    all_ok, details = health_service.check_all_services()
+    if all_ok:
+        return jsonify({"status": "ok", "details": details}), 200
+    else:
+        return jsonify({"status": "error", "details": details}), 503

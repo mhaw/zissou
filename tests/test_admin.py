@@ -2,33 +2,33 @@ from unittest.mock import patch, MagicMock
 from flask import g
 
 
-@patch("app.auth.ensure_user")
-def test_admin_page_unauthorized_access(mock_ensure_user, client):
+@patch("app.auth.get_current_user")
+def test_admin_page_unauthorized_access(mock_get_current_user, client):
     """Tests that a non-admin user gets a 403 when accessing /admin."""
     with client.application.app_context():
-        mock_ensure_user.return_value = {
+        mock_get_current_user.return_value = {
             "uid": "user_uid",
             "email": "user@example.com",
             "role": "member",
         }
         g.user = (
-            mock_ensure_user.return_value
+            mock_get_current_user.return_value
         )  # Ensure g.user is set for context processors
         response = client.get("/admin/")
         assert response.status_code == 403
 
 
-@patch("app.auth.ensure_user")
-def test_admin_page_authorized_access(mock_ensure_user, client):
+@patch("app.auth.get_current_user")
+def test_admin_page_authorized_access(mock_get_current_user, client):
     """Tests that an admin user can access /admin."""
     with client.application.app_context():
-        mock_ensure_user.return_value = {
+        mock_get_current_user.return_value = {
             "uid": "admin_uid",
             "email": "admin@example.com",
             "role": "admin",
         }
         g.user = (
-            mock_ensure_user.return_value
+            mock_get_current_user.return_value
         )  # Ensure g.user is set for context processors
         with patch("app.services.tasks.list_tasks") as mock_list_tasks, patch(
             "app.services.tasks.get_status_counts"
@@ -63,17 +63,17 @@ def test_admin_page_authorized_access(mock_ensure_user, client):
             assert b"Admin Dashboard" in response.data
 
 
-@patch("app.auth.ensure_user")
-def test_admin_page_filters(mock_ensure_user, client):
+@patch("app.auth.get_current_user")
+def test_admin_page_filters(mock_get_current_user, client):
     """Tests the server-side filtering and sorting of the admin task list."""
     with client.application.app_context():
-        mock_ensure_user.return_value = {
+        mock_get_current_user.return_value = {
             "uid": "admin_uid",
             "email": "admin@example.com",
             "role": "admin",
         }
         g.user = (
-            mock_ensure_user.return_value
+            mock_get_current_user.return_value
         )  # Ensure g.user is set for context processors
         with patch("app.services.tasks.list_tasks") as mock_list_tasks, patch(
             "app.services.tasks.get_status_counts"
@@ -109,17 +109,17 @@ def test_admin_page_filters(mock_ensure_user, client):
 
 
 @patch("app.services.audit.log_admin_action")
-@patch("app.auth.ensure_user")
-def test_admin_actions_audit_logging(mock_ensure_user, mock_log_admin_action, client):
+@patch("app.auth.get_current_user")
+def test_admin_actions_audit_logging(mock_get_current_user, mock_log_admin_action, client):
     """Tests that admin actions are audited."""
     with client.application.app_context():
-        mock_ensure_user.return_value = {
+        mock_get_current_user.return_value = {
             "uid": "admin_uid",
             "email": "admin@example.com",
             "role": "admin",
         }
         g.user = (
-            mock_ensure_user.return_value
+            mock_get_current_user.return_value
         )  # Ensure g.user is set for context processors
         with patch("app.services.audit.db") as mock_audit_db:  # Patch audit.db
             mock_audit_db.collection.return_value.document.return_value.set.return_value = (

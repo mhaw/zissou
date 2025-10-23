@@ -1,19 +1,17 @@
+import logging
 import os
 from datetime import datetime, timezone
-import logging
 
 from cachetools import cached, TTLCache
+from google.cloud import firestore
 from google.cloud.exceptions import GoogleCloudError
 
 from app.models.bucket import Bucket
+from app.services.firestore_client import db, FirestoreError
 from app.services.firestore_helpers import (
     clear_cached_functions,
     ensure_db_client,
-    normalise_timestamp,
 )
-
-# Use the shared client from the items service to ensure single instantiation
-from .items import db, FirestoreError
 
 from typing import Optional
 
@@ -56,11 +54,14 @@ def _doc_to_bucket(doc) -> Bucket:
     """Converts a Firestore document to a Bucket dataclass."""
     data = doc.to_dict() or {}
     data["id"] = doc.id
-    for field in ("createdAt", "updatedAt"):
-        if field in data:
-            data[field] = normalise_timestamp(data[field])
-    filtered = {key: value for key, value in data.items() if key in _BUCKET_FIELDS}
-    return Bucket(**filtered)
+    return Bucket.from_dict(data)
+
+
+def _invalidate_feed_cache(bucket_slug: str) -> None:
+    """Lazy import to avoid circular dependency with app.services.feeds."""
+    from app.services.feeds import invalidate_feed_cache as _invalidate  # local import
+
+    _invalidate(bucket_slug)
 
 
 @cached(cache=TTLCache(maxsize=32, ttl=600))
@@ -68,9 +69,10 @@ def get_bucket_by_slug(slug: str) -> Bucket | None:
     """Retrieves a single bucket by its slug."""
     _require_db()
     try:
+        normalised = (slug or "").strip().lower()
         buckets_ref = db.collection(BUCKETS_COLLECTION)
         query = buckets_ref.where(
-            filter=firestore.FieldFilter("slug", "==", slug)
+            filter=firestore.FieldFilter("slug", "==", normalised)
         ).limit(1)
         docs = list(query.stream())
         if not docs:
@@ -139,6 +141,7 @@ def create_bucket(
     """Creates a new bucket."""
     _require_db()
     try:
+        slug = (slug or "").strip().lower()
         bucket_ref = db.collection(BUCKETS_COLLECTION).document()
         now = datetime.utcnow()
         new_bucket = Bucket(
@@ -161,6 +164,7 @@ def create_bucket(
         clear_cached_functions(
             (list_buckets, list_recent_buckets, get_bucket, get_bucket_by_slug)
         )
+        _invalidate_feed_cache(new_bucket.slug)
         return bucket_ref.id
     except GoogleCloudError as e:
         logger.error(

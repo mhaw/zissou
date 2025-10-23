@@ -75,7 +75,11 @@ def clean_text(raw_text: str | None) -> str:
                 continue
             normalised_lines.append("")
         else:
-            if _HEADING_PREFIX.match(line) and normalised_lines and normalised_lines[-1]:
+            if (
+                _HEADING_PREFIX.match(line)
+                and normalised_lines
+                and normalised_lines[-1]
+            ):
                 normalised_lines.append("")
             if (
                 _LIST_PREFIX.match(line)

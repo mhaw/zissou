@@ -3,14 +3,14 @@
         return;
     }
 
-    const CSRF_META_SELECTOR = 'meta[name="csrf-token"]';
-
-    function getCsrfToken() {
+    function csrfToken() {
+        if (window.Zissou && typeof window.Zissou.csrf === 'function') {
+            return window.Zissou.csrf();
+        }
         if (window.Zissou && typeof window.Zissou.getCsrfToken === 'function') {
             return window.Zissou.getCsrfToken();
         }
-        const meta = document.querySelector(CSRF_META_SELECTOR);
-        return meta ? meta.getAttribute('content') : '';
+        return '';
     }
 
     function updateStatus(element, message, state) {
@@ -385,12 +385,12 @@
         fetch(endpoint, {
             method: 'POST',
             headers: {
-                'X-CSRFToken': getCsrfToken(),
+                'X-CSRFToken': csrfToken(),
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            credentials: 'include',
+            credentials: 'same-origin',
             body: JSON.stringify({ tags: previousTags })
         }).then((response) => {
             if (!response.ok) {

@@ -1,13 +1,15 @@
 (function () {
-    const CSRF_META_SELECTOR = 'meta[name="csrf-token"]';
-
-    function getCsrfToken() {
-        const meta = document.querySelector(CSRF_META_SELECTOR);
-        return meta ? meta.getAttribute('content') : '';
+    function fallbackCsrfToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') || '' : '';
     }
 
     window.Zissou = window.Zissou || {};
-    window.Zissou.getCsrfToken = getCsrfToken;
+    const csrfGetter = typeof window.Zissou.csrf === 'function'
+        ? window.Zissou.csrf
+        : fallbackCsrfToken;
+    window.Zissou.csrf = csrfGetter;
+    window.Zissou.getCsrfToken = csrfGetter;
     const COLOR_CLASSES = [
         'border-sky-200 bg-sky-50 text-sky-700',
         'border-violet-200 bg-violet-50 text-violet-700',

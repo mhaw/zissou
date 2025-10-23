@@ -5,14 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.9.3] - 2025-10-11
+### Fixed
+- Restored missing _extract_with_trafilatura function
+- Added runtime import validation for extractors
+- Added startup import health check to prevent Service Unavailable loops
+- Docker build now validates Python imports before deployment
+
 ## [Unreleased]
 
 ### Added
+- Public feeds index page with navigation entry surfacing RSS endpoints for buckets marked public.
+- Firestore composite index for bucket RSS queries plus explicit deploy command coverage.
 - Centralized Firebase authentication configuration using `FirebaseAuthConfig` dataclass for improved validation and management.
 - Asynchronous archive recovery utility with concurrency limits, Firestore-backed failure caching, and optional Goose3 extraction tier.
 - Configuration flags `ARCHIVE_TIMEOUT`, `ARCHIVE_CONCURRENCY`, and `FALLBACK_MIN_LENGTH` to tune archive backoff and high-confidence extractor results.
 
 ### Changed
+- Bucket RSS responses now soft-fail with a 503 and guidance while Firestore builds required composite indexes.
 - Refactored login and signup forms in `app/templates/login.html` and `app/static/js/login.js` for a clearer user experience with separate sign-in and sign-up views.
 - Enhanced logging in `app/routes/auth.py` with structured `auth_event` tags for better debugging and analysis of authentication flows.
 - Removed `ADMIN_EMAILS` environment variable usage for role assignment; new users now default to the "member" role, with admin status managed separately.
@@ -20,11 +30,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bucket and tag editors now send `X-CSRFToken` headers with credentials when calling `/api/items/*`, unblocking authenticated POSTs without disabling CSRF protection.
 - Cloud Run images export `GRPC_VERBOSITY=ERROR` to suppress noisy gRPC warnings, and the progress page polls `/status/<task_id>` every 2 seconds with automatic stop on completion.
 
+### Fixed
+- Item detail pages now import the tag summary macro to avoid Jinja TemplateSyntaxError when rendering bucket tags.
+
 ### Removed
 - Removed support for Google Cloud Identity-Aware Proxy (IAP) as an authentication backend. The application now exclusively uses Firebase Authentication.
 - The `AUTH_BACKEND` environment variable is no longer used.
 - Simplified authentication logic in `app/auth.py` and `app/routes/auth.py` by removing IAP-specific code.
 - Deleted `tests/test_auth_flow.py`, which contained IAP-specific tests.
+
+## [v0.9.0] - 2025-10-10
+
+### Added
+- Structured JSON logging with correlation IDs and per-request context shared across web routes and Cloud Tasks.
+- Inline `/progress/<task>` refresh with progress bar, polling safeguards, and completion toast.
+- Committed `firestore.indexes.json` and new `firestore.rules`, plus README guidance for deploying both.
+- Optional AI-powered article summaries and auto-tag generation with asynchronous background workers and Firestore storage.
+- Dark mode toggle persisted via `localStorage` with Tailwind `dark:` variants for core layouts.
+- Shared CSRF helper in `app/static/js/utils.js`, standardising `X-CSRFToken` headers with `same-origin` credentials.
+
+### Changed
+- Extraction pipeline now iterates a registry of strategies, logging per-engine attempts (`engine`, `status`, `chars`, `truncated`, `elapsed_ms`) for observability.
 
 ## [0.2.0] - 2025-10-10
 
@@ -58,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Browse Pagination**: Replaced the old HTMX placeholder with a real load-more experience that appends cards in-place and handles JSON responses.
 - **Text Normalisation**: Article extraction now runs through a cleaning pipeline that normalises encoding glitches, strips boilerplate, and compresses whitespace before TTS or feed generation.
 - **Firestore Indexes**: Expanded composite indexes to cover tag and bucket filters combined with title/duration sort orders, preventing Firestore 400s under common queries.
-- **Cloud Tasks Queue**: Provisioning script now pins a dead-letter queue and exponential backoff (min/max backoff, max doublings, retry duration) so failing jobs are retried safely and quarantined after repeated errors.
+- **Cloud Tasks Queue**: Provisioning script now pins a dead-letter queue and exponential backoff (min/max backoff, max doublings, max doublings, retry duration) so failing jobs are retried safely and quarantined after repeated errors.
 - **Voice Palette**: Default profiles now use newer Neural2/Studio narrators with tuned rate and pitch for smoother long-form listening.
 - **Share Previews**: Item detail pages now emit Open Graph and Twitter metadata tuned to the article, so mobile share sheets surface rich titles, descriptions, and artwork.
 - **Browse Items Layout**: Item cards now present metadata in dedicated sections (duration, publish date, buckets, tags) for faster scanning across the grid.
@@ -151,3 +177,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Feed Generation Error**: Resolved `AttributeError: 'dict' object has no attribute 'name'` in feed generation by ensuring `Bucket` objects are used.
 - **ETag Generation Error**: Fixed `AttributeError: 'bytes' object has no attribute 'encode'` in feed ETag generation by correctly handling `bytes` content.
 - **Syntax Error**: Resolved `SyntaxError` in `app/routes/main.py` caused by a faulty `replace` operation.
+
+## [v0.9.2] - 2025-10-12
+### Improved
+- **Dependency Management**: Separated production (`requirements.txt`) and development (`dev-requirements.txt`) dependencies to create smaller and more secure production builds.
+- **Versioning Strategy**: Refined `requirements.in` to use `~=` version pinning for key libraries, preventing breaking changes from major version upgrades while allowing patches.
+- **Dockerfile Optimization**: Optimized Dockerfile layer caching by installing dependencies before copying application code, resulting in faster build times.
+- **Security Hardening**: Added `pip-audit` to the test suite to automatically scan for known vulnerabilities in dependencies.
+- **Reliability**: Added a `/healthz` endpoint for container health checks, improving deployment stability in Cloud Run.
+- **CI/CD**: Enhanced the `Makefile` to include `pip check` and `pip-audit` in the `test` target, ensuring dependency integrity and security.

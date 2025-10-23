@@ -34,9 +34,19 @@ class FirestoreSessionInterface(SessionInterface):
         self._fallback_interface = SecureCookieSessionInterface()
         self._warned_missing_db = False
 
+    def _should_use_firestore(self, app) -> bool:
+        """Return True when Firestore-backed sessions should be used."""
+        if app.config.get("TESTING", False):
+            return False
+        return self.db is not None
+
     def open_session(self, app, request):
-        if self.db is None:
-            if not self._warned_missing_db:
+        if not self._should_use_firestore(app):
+            if (
+                self.db is None
+                and not self._warned_missing_db
+                and not app.config.get("TESTING", False)
+            ):
                 app.logger.warning(
                     "Firestore session backend unavailable; using secure cookie sessions."
                 )
@@ -53,9 +63,10 @@ class FirestoreSessionInterface(SessionInterface):
             doc_ref = self.db.collection(self.collection).document(sid)
             doc = doc_ref.get()
         except Exception as exc:  # pragma: no cover - defensive logging
-            app.logger.exception(
-                "Failed to load session %s from Firestore; falling back to secure cookie.",
+            app.logger.warning(
+                "Failed to load session %s from Firestore; falling back to secure cookie. Error: %s",
                 sid,
+                exc,
             )
             return self._fallback_interface.open_session(app, request)
 
@@ -75,7 +86,9 @@ class FirestoreSessionInterface(SessionInterface):
         return self.session_class(sid=sid, new=True)
 
     def save_session(self, app, session, response):
-        if not isinstance(session, self.session_class) or self.db is None:
+        if not isinstance(
+            session, self.session_class
+        ) or not self._should_use_firestore(app):
             self._fallback_interface.save_session(app, session, response)
             return
 
@@ -91,23 +104,43 @@ class FirestoreSessionInterface(SessionInterface):
                 datetime.now(timezone.utc) + app.permanent_session_lifetime
             )
             doc_ref = self.db.collection(self.collection).document(session.sid)
-            try:
-                doc_ref.set(session_data, timeout=30)
-            except Forbidden as exc:
-                app.logger.error(
-                    "Firestore denied session write for %s: %s. Verify the Cloud Run service account has the roles/datastore.user permission.",
-                    session.sid,
-                    exc,
-                )
-                self._fallback_interface.save_session(app, session, response)
-                return
-            except Exception as exc:  # pragma: no cover - defensive logging
-                app.logger.exception(
-                    "Failed to persist session %s to Firestore; falling back to secure cookie.",
-                    session.sid,
-                )
-                self._fallback_interface.save_session(app, session, response)
-                return
+            # Attempt to save session with retries
+            max_retries = 3
+            base_delay = 0.5  # seconds
+            for i in range(max_retries):
+                try:
+                    doc_ref.set(session_data, timeout=30)
+                    break  # Success, exit retry loop
+                except Forbidden as exc:
+                    app.logger.error(
+                        "Firestore denied session write for %s: %s. Verify the Cloud Run service account has the roles/datastore.user permission.",
+                        session.sid,
+                        exc,
+                    )
+                    self._fallback_interface.save_session(app, session, response)
+                    return
+                except Exception as exc:
+                    if i < max_retries - 1:
+                        delay = base_delay * (2**i)
+                        app.logger.warning(
+                            "Transient error persisting session %s to Firestore (attempt %d/%d): %s. Retrying in %.2f seconds.",
+                            session.sid,
+                            i + 1,
+                            max_retries,
+                            exc,
+                            delay,
+                        )
+                        import time
+                        time.sleep(delay)
+                    else:
+                        app.logger.warning(
+                            "Failed to persist session %s to Firestore after %d attempts; falling back to secure cookie. Error: %s",
+                            session.sid,
+                            max_retries,
+                            exc,
+                        )
+                        self._fallback_interface.save_session(app, session, response)
+                        return
 
         response.set_cookie(
             cookie_name,

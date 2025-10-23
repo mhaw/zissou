@@ -151,6 +151,28 @@ def require_roles(*roles: str):
         return None
 
     user = ensure_user()
+
+    if roles:
+        allowed = {role.lower() for role in roles if role}
+        current_role = (user.get("role") or "").lower() if user else ""
+        if allowed and current_role not in allowed:
+            logger.warning(
+                "User role authorization failure",
+                extra={
+                    "auth_event": "role_required_failure",
+                    "user_id": user.get("uid") if user else "anonymous",
+                    "user_role": current_role,
+                    "required_roles": list(allowed),
+                    "path": request.path,
+                    "ip": request.remote_addr,
+                },
+            )
+            if user:  # User is logged in but has wrong role
+                abort(403)
+            else:  # User is not logged in
+                login_url = url_for("auth.login", next=request.full_path)
+                return redirect(login_url, code=302)
+
     if not user:
         logger.info(
             "Unauthenticated access attempt blocked",
@@ -163,23 +185,6 @@ def require_roles(*roles: str):
         )
         login_url = url_for("auth.login", next=request.full_path)
         return redirect(login_url, code=302)
-
-    if roles:
-        allowed = {role.lower() for role in roles if role}
-        current_role = (user.get("role") or "").lower()
-        if allowed and current_role not in allowed:
-            logger.warning(
-                "User role authorization failure",
-                extra={
-                    "auth_event": "role_required_failure",
-                    "user_id": user.get("uid"),
-                    "user_role": current_role,
-                    "required_roles": list(allowed),
-                    "path": request.path,
-                    "ip": request.remote_addr,
-                },
-            )
-            abort(403)
 
     return None
 
