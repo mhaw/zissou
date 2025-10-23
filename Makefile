@@ -13,6 +13,7 @@ AR_REPOSITORY = zissou-repo
 GCP_PROJECT_ID ?= $(shell grep GCP_PROJECT_ID .env | cut -d '=' -f2 | xargs)
 GCP_REGION ?= $(shell grep GCP_REGION .env | cut -d '=' -f2)
 GCS_BUCKET ?= $(shell grep GCS_BUCKET .env | cut -d '=' -f2)
+FLASK_SECRET_KEY ?= $(shell grep FLASK_SECRET_KEY .env | cut -d '=' -f2 | xargs)
 IMAGE_REGISTRY = $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT_ID)/$(AR_REPOSITORY)
 GIT_SHA = $(shell git rev-parse --short HEAD 2>/dev/null || /bin/date +%s)
 IMAGE_TAG = $(IMAGE_REGISTRY)/$(APP_NAME):$(GIT_SHA)
@@ -92,7 +93,11 @@ auth\:emulators:
 build:
 	@echo "Building Docker image: $(IMAGE_TAG)..."
 	python -m py_compile app/**/*.py
-	docker build --platform linux/amd64 -t $(IMAGE_TAG) .
+	docker build --platform linux/amd64 \
+		--build-arg FLASK_SECRET_KEY=$(FLASK_SECRET_KEY) \
+		--build-arg GCP_PROJECT_ID=$(GCP_PROJECT_ID) \
+		--build-arg GCS_BUCKET=$(GCS_BUCKET) \
+		-t $(IMAGE_TAG) .
 	docker tag $(IMAGE_TAG) $(LATEST_TAG)
 	@echo "Tagged image as: $(LATEST_TAG)"
 
